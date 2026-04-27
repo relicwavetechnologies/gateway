@@ -5,11 +5,6 @@ import { ActiveAccount } from '../db/accounts.js';
 const ENDPOINT = 'https://chatgpt.com/backend-api/codex/responses';
 
 const MODEL_MAP: Record<string, string> = {
-    'gpt-4o': 'gpt-5.4',
-    'gpt-4o-mini': 'gpt-5.4-mini',
-    'gpt-4-turbo': 'gpt-5.4',
-    'gpt-4': 'gpt-5.4',
-    'gpt-3.5-turbo': 'gpt-5.4-mini',
     'gpt-5.4': 'gpt-5.4',
     'gpt-5.4-mini': 'gpt-5.4-mini',
     'gpt-5.3-codex': 'gpt-5.3-codex',
@@ -31,7 +26,8 @@ export async function forwardToOpenAI(
     openaiRequest: OpenAIRequest,
     res: Response,
 ): Promise<{ replyText: string }> {
-    const model = MODEL_MAP[openaiRequest.model] ?? 'gpt-5.4';
+    const model = MODEL_MAP[openaiRequest.model];
+    if (!model) throw new Error(`Unsupported model "${openaiRequest.model}". Available: ${Object.keys(MODEL_MAP).join(', ')}`);
     const isStream = openaiRequest.stream ?? false;
 
     const payload = {
