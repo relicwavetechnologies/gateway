@@ -18,7 +18,7 @@ export default function Login() {
     try {
       const { token } = await login(email, password)
       setToken(token)
-      navigate('/')
+      window.location.replace('/')
     } catch {
       setError('Invalid email or password')
     } finally {
