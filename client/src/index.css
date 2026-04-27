@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+  body {
+    @apply bg-zinc-950 text-zinc-100 antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { @apply bg-zinc-900; }
+  ::-webkit-scrollbar-thumb { @apply bg-zinc-700 rounded-full; }
+}
+
+@layer components {
+  .card { @apply bg-zinc-900 border border-zinc-800 rounded-xl p-5; }
+  .badge { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border; }
+  .btn-primary { @apply bg-brand hover:bg-brand-dark text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50; }
+  .btn-ghost { @apply text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 px-3 py-2 rounded-lg text-sm transition-colors; }
+  .btn-danger { @apply text-red-400 hover:text-red-300 hover:bg-red-500/10 px-3 py-2 rounded-lg text-sm transition-colors; }
+  .input { @apply bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-brand placeholder-zinc-500 w-full; }
+  .label { @apply block text-xs font-medium text-zinc-400 mb-1.5; }
+}

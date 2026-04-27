@@ -1,0 +1,13 @@
+{
+  "name": "gateway",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n server,client -c cyan,magenta \"pnpm --filter gateway-server dev\" \"pnpm --filter gateway-client dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "pnpm": {
+    "overrides": {}
+  }
+}
