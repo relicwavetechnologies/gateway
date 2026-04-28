@@ -9,6 +9,7 @@ import adminAccountsRouter from './routes/admin.accounts.js';
 import adminKeysRouter from './routes/admin.keys.js';
 import adminUsageRouter from './routes/admin.usage.js';
 import proxyRouter from './routes/proxy.js';
+import voiceRouter from './routes/voice.js';
 
 const app = express();
 const PORT = process.env.PORT ?? 4000;
@@ -21,6 +22,7 @@ app.use('/admin/accounts', adminAccountsRouter);
 app.use('/admin/api-keys', adminKeysRouter);
 app.use('/admin/usage', adminUsageRouter);
 app.use('/v1', proxyRouter);
+app.use('/v1/voice', voiceRouter);
 
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
@@ -34,9 +36,10 @@ async function main() {
     await initSchema();
     app.listen(PORT, () => {
         console.log(`Gateway server running on http://localhost:${PORT}`);
-        console.log(`  OpenAI proxy : POST /v1/chat/completions`);
-        console.log(`  Claude proxy : POST /v1/messages`);
-        console.log(`  Admin API    : /admin/*`);
+        console.log(`  OpenAI proxy  : POST /v1/chat/completions`);
+        console.log(`  Claude proxy  : POST /v1/messages`);
+        console.log(`  Voice Polish  : POST /v1/voice/polish  (multipart: audio + mode/lang)`);
+        console.log(`  Admin API     : /admin/*`);
     });
 }
 
