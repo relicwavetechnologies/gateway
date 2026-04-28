@@ -3,7 +3,7 @@ import { v4 as uuid } from 'uuid';
 import { requireAdmin } from '../middleware/auth.js';
 import { createSession, exchangeCode } from '../oauth/openai.js';
 import { createSession as createGeminiSession, exchangeCode as exchangeGeminiCode } from '../oauth/gemini.js';
-import { removeCredentials } from '../oauth/claude.js';
+import { createSession as createClaudeSession, exchangeCode as exchangeClaudeCode } from '../oauth/claude.js';
 import { createAccount, listAccounts, getAccount, patchAccount, deleteAccount, Account } from '../db/accounts.js';
 
 const router = Router();
@@ -22,7 +22,7 @@ router.post('/initiate', (req, res) => {
 
     if (provider === 'openai') {
         const { sessionId, authUrl } = createSession();
-        res.json({ session_id: sessionId, provider, auth_url: authUrl, instructions: 'Click the link to authenticate with your ChatGPT account.' });
+        res.json({ session_id: sessionId, provider, auth_url: authUrl, instructions: 'Click the link to authenticate with your ChatGPT account. After login, copy the full URL from your browser address bar and paste it below.' });
         return;
     }
 
@@ -32,20 +32,24 @@ router.post('/initiate', (req, res) => {
         return;
     }
 
-    res.json({ session_id: uuid(), provider: 'claude', auth_url: null, instructions: 'Run gateway/scripts/get_claude_token.py on your machine, then paste the access token below.' });
+    if (provider === 'claude') {
+        const { sessionId, authUrl } = createClaudeSession();
+        res.json({ session_id: sessionId, provider, auth_url: authUrl, instructions: 'Click the link to sign in with your Claude.ai account. After login, the browser will redirect to localhost — copy the full URL from the address bar and paste it below.' });
+        return;
+    }
 });
 
 router.post('/complete', async (req, res) => {
-    const { session_id, provider, code, credential_blob, label } = req.body as {
+    const { session_id, provider, code, label } = req.body as {
         session_id: string;
         provider: 'openai' | 'claude' | 'gemini';
         code?: string;
-        credential_blob?: string;
         label?: string;
     };
 
+    if (!code) { res.status(400).json({ error: 'code is required' }); return; }
+
     if (provider === 'openai') {
-        if (!code) { res.status(400).json({ error: 'code is required for OpenAI' }); return; }
         const { accessToken, refreshToken, expiresAt } = await exchangeCode(session_id, code);
         const account = await createAccount({ id: uuid(), provider: 'openai', label: label ?? 'OpenAI account', accessToken, refreshToken, expiresAt, createdBy: req.uid });
         res.json(account);
@@ -53,7 +57,6 @@ router.post('/complete', async (req, res) => {
     }
 
     if (provider === 'gemini') {
-        if (!code) { res.status(400).json({ error: 'code is required for Gemini' }); return; }
         const { accessToken, refreshToken, expiresAt } = await exchangeGeminiCode(session_id, code);
         const account = await createAccount({ id: uuid(), provider: 'gemini', label: label ?? 'Gemini account', accessToken, refreshToken, expiresAt, createdBy: req.uid });
         res.json(account);
@@ -61,9 +64,8 @@ router.post('/complete', async (req, res) => {
     }
 
     if (provider === 'claude') {
-        if (!credential_blob) { res.status(400).json({ error: 'Paste the access token from get_claude_token.py' }); return; }
-        const id = uuid();
-        const account = await createAccount({ id, provider: 'claude', label: label ?? 'Claude account', accessToken: credential_blob.trim(), refreshToken: null, expiresAt: null, createdBy: req.uid });
+        const { accessToken, refreshToken, expiresAt } = await exchangeClaudeCode(session_id, code);
+        const account = await createAccount({ id: uuid(), provider: 'claude', label: label ?? 'Claude account', accessToken, refreshToken, expiresAt, createdBy: req.uid });
         res.json(account);
         return;
     }
@@ -76,19 +78,18 @@ router.post('/:id/test', async (req, res) => {
     if (!account) { res.status(404).json({ error: 'Account not found' }); return; }
 
     try {
+        const { listActiveAccounts } = await import('../db/accounts.js');
+
         if (account.provider === 'openai') {
-            const { listActiveAccounts } = await import('../db/accounts.js');
             const { forwardToOpenAI } = await import('../loadbalancer/openai.js');
             const actives = await listActiveAccounts('openai');
             const active = actives.find(a => a.id === account.id);
             if (!active) { res.status(400).json({ error: 'Account not active or no token' }); return; }
-
             let reply = '';
             const fakeRes = {
-                setHeader: () => { /* noop */ }, write: () => { /* noop */ }, end: () => { /* noop */ },
-                json: (data: { choices?: { message?: { content?: string } }[] }) => { reply = data.choices?.[0]?.message?.content ?? ''; },
+                setHeader: () => {}, write: () => {}, end: () => {},
+                json: (d: any) => { reply = d.choices?.[0]?.message?.content ?? ''; },
             } as unknown as import('express').Response;
-
             await forwardToOpenAI(active, { model: 'gpt-5.4', messages: [{ role: 'user', content: 'say "ok" only' }], stream: false }, fakeRes);
             res.json({ ok: true, reply });
             return;
@@ -96,17 +97,14 @@ router.post('/:id/test', async (req, res) => {
 
         if (account.provider === 'gemini') {
             const { forwardToGemini } = await import('../loadbalancer/gemini.js');
-            const { listActiveAccounts } = await import('../db/accounts.js');
             const actives = await listActiveAccounts('gemini');
             const active = actives.find(a => a.id === account.id);
             if (!active) { res.status(400).json({ error: 'Account not active or no token' }); return; }
-
             let reply = '';
             const fakeRes = {
-                setHeader: () => { /* noop */ }, write: () => { /* noop */ }, end: () => { /* noop */ },
-                json: (data: { choices?: { message?: { content?: string } }[] }) => { reply = data.choices?.[0]?.message?.content ?? ''; },
+                setHeader: () => {}, write: () => {}, end: () => {},
+                json: (d: any) => { reply = d.choices?.[0]?.message?.content ?? ''; },
             } as unknown as import('express').Response;
-
             await forwardToGemini(active, { model: 'gemini-2.5-flash', messages: [{ role: 'user', content: 'say "ok" only' }], stream: false }, fakeRes);
             res.json({ ok: true, reply });
             return;
@@ -114,15 +112,15 @@ router.post('/:id/test', async (req, res) => {
 
         if (account.provider === 'claude') {
             const { forwardToClaude } = await import('../loadbalancer/claude.js');
+            const actives = await listActiveAccounts('claude');
+            const active = actives.find(a => a.id === account.id);
+            if (!active) { res.status(400).json({ error: 'Account not active or no token' }); return; }
             let reply = '';
             const fakeRes = {
-                setHeader: () => { /* noop */ }, write: () => { /* noop */ }, end: () => { /* noop */ },
-                json: (data: { content?: { text?: string }[] }) => { reply = data.content?.[0]?.text ?? ''; },
-                status: () => ({ json: () => { /* noop */ } }),
+                setHeader: () => {}, write: () => {}, end: () => {},
+                json: (d: any) => { reply = d.content?.[0]?.text ?? ''; },
             } as unknown as import('express').Response;
-
-            // ActiveAccount shape: spread account + access_token field
-            await forwardToClaude({ ...account, access_token: null }, { messages: [{ role: 'user', content: 'say "ok" only' }], stream: false }, fakeRes);
+            await forwardToClaude(active, { model: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'say "ok" only' }], stream: false }, fakeRes);
             res.json({ ok: true, reply });
             return;
         }
@@ -138,8 +136,6 @@ router.patch('/:id', async (req, res) => {
 });
 
 router.delete('/:id', async (req, res) => {
-    const account = await getAccount(req.params.id);
-    if (account?.provider === 'claude') removeCredentials(req.params.id);
     await deleteAccount(req.params.id);
     res.json({ ok: true });
 });

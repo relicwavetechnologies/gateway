@@ -29,8 +29,7 @@ export default function Accounts() {
     mutationFn: () => completeAccount({
       session_id: initData.session_id,
       provider,
-      code: (provider === 'openai' || provider === 'gemini') ? code : undefined,
-      credential_blob: provider === 'claude' ? blob : undefined,
+      code: code || undefined,
       label: label || undefined,
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['accounts'] }); reset() },
@@ -56,7 +55,10 @@ const test = useMutation({
   function reset() { setShowModal(false); setStep('idle'); setInitData(null); setCode(''); setBlob(''); setLabel(''); setCompleteError(null) }
 
   function extractCodeFromUrl(url: string) {
-    try { return new URL(url).searchParams.get('code') ?? url } catch { return url }
+    try {
+      const u = new URL(url)
+      return u.searchParams.get('code') ?? url
+    } catch { return url }
   }
 
   return (
@@ -148,34 +150,21 @@ const test = useMutation({
                 </>
               )}
 
-              {step === 'initiated' && (provider === 'openai' || provider === 'gemini') && (
+              {step === 'initiated' && (
                 <div className="space-y-4">
-                  <div className={cn('p-3 rounded-lg border text-sm', provider === 'openai' ? 'bg-blue-500/10 border-blue-500/20 text-blue-300' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300')}>
+                  <div className={cn('p-3 rounded-lg border text-sm',
+                    provider === 'openai' ? 'bg-blue-500/10 border-blue-500/20 text-blue-300'
+                    : provider === 'gemini' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                    : 'bg-violet-500/10 border-violet-500/20 text-violet-300'
+                  )}>
                     {initData.instructions}
                   </div>
                   <a href={initData.auth_url} target="_blank" rel="noreferrer" className="btn-primary w-full flex items-center justify-center gap-2">
-                    Open {provider === 'openai' ? 'OpenAI' : 'Google'} Login ↗
+                    Open {provider === 'openai' ? 'OpenAI' : provider === 'gemini' ? 'Google' : 'Claude.ai'} Login ↗
                   </a>
                   <div>
                     <label className="label">Paste the full callback URL from your browser address bar</label>
-                    <input className="input" placeholder="http://localhost:.../oauth/callback?code=..." value={code} onChange={e => setCode(extractCodeFromUrl(e.target.value))} />
-                  </div>
-                </div>
-              )}
-
-              {step === 'initiated' && provider === 'claude' && (
-                <div className="space-y-4">
-                  <div className="p-3 bg-violet-500/10 border border-violet-500/20 rounded-lg text-sm text-violet-300">
-                    {initData.instructions}
-                  </div>
-                  <div>
-                    <label className="label">Paste access token</label>
-                    <textarea
-                      className="input h-20 resize-none font-mono text-xs"
-                      placeholder="eyJ..."
-                      value={blob}
-                      onChange={e => setBlob(e.target.value)}
-                    />
+                    <input className="input" placeholder="http://localhost:9475/callback?code=..." value={code} onChange={e => setCode(extractCodeFromUrl(e.target.value))} />
                   </div>
                 </div>
               )}
@@ -209,7 +198,7 @@ const test = useMutation({
                   )}
                   <button
                     onClick={() => complete.mutate()}
-                    disabled={complete.isPending || ((provider === 'openai' || provider === 'gemini') ? !code : !blob)}
+                    disabled={complete.isPending || !code}
                     className="btn-primary"
                   >
                     {complete.isPending ? 'Connecting...' : 'Connect Account'}

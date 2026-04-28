@@ -1,14 +1,16 @@
 import '../utils/env.js';
-import { getDecryptedTokens, updateAccountTokens, updateAccountStatus, getExpiringOpenAIAccounts, getExpiringGeminiAccounts, resetExpiredCooldowns } from '../db/accounts.js';
+import { getDecryptedTokens, updateAccountTokens, updateAccountStatus, getExpiringOpenAIAccounts, getExpiringGeminiAccounts, getExpiringClaudeAccounts, resetExpiredCooldowns } from '../db/accounts.js';
 import { createAlert, markAlertEmailed, getUnEmailedAlerts } from '../db/usage.js';
 import { refreshToken as refreshOpenAIToken } from '../oauth/openai.js';
 import { refreshGeminiToken } from '../oauth/gemini.js';
+import { refreshClaudeToken } from '../oauth/claude.js';
 import { sendAlert } from '../utils/email.js';
 import { v4 as uuid } from 'uuid';
 
 const CHECK_INTERVAL_MS = 5 * 60_000;
 const OPENAI_REFRESH_WINDOW_MS = 24 * 60 * 60_000;
-const GEMINI_REFRESH_WINDOW_MS = 30 * 60_000; // Gemini tokens expire in 1h — refresh within 30min
+const GEMINI_REFRESH_WINDOW_MS = 30 * 60_000;  // Gemini tokens expire in 1h
+const CLAUDE_REFRESH_WINDOW_MS = 30 * 60_000;  // Claude tokens expire in 1h
 
 async function refreshExpiringTokens(): Promise<void> {
     // OpenAI — refresh 24h before expiry
@@ -58,6 +60,31 @@ async function refreshExpiringTokens(): Promise<void> {
             console.error(`[worker] Failed to refresh Gemini for ${account.label}:`, msg);
             await updateAccountStatus(account.id, 'auth_expired', 0);
             await createAlert({ id: uuid(), accountId: account.id, provider: 'gemini', kind: 'auth_expired', message: `${account.label} — Gemini token refresh failed: ${msg}` });
+        }
+    }
+
+    // Claude — refresh 30min before expiry (tokens last only 1h)
+    const claudeThreshold = Date.now() + CLAUDE_REFRESH_WINDOW_MS;
+    const expiringClaude = await getExpiringClaudeAccounts(claudeThreshold);
+
+    for (const account of expiringClaude) {
+        console.log(`[worker] Refreshing Claude token for ${account.label}`);
+        const tokens = await getDecryptedTokens(account.id);
+        if (!tokens?.refreshToken) {
+            console.warn(`[worker] No Claude refresh token for ${account.label} — marking auth_expired`);
+            await updateAccountStatus(account.id, 'auth_expired', 0);
+            await createAlert({ id: uuid(), accountId: account.id, provider: 'claude', kind: 'auth_expired', message: `${account.label} — Claude token expired and no refresh token. Reconnect needed.` });
+            continue;
+        }
+        try {
+            const { accessToken, expiresAt } = await refreshClaudeToken(tokens.refreshToken);
+            await updateAccountTokens(account.id, accessToken, tokens.refreshToken, expiresAt);
+            console.log(`[worker] Refreshed Claude token for ${account.label}, expires ${expiresAt}`);
+        } catch (err: unknown) {
+            const msg = (err as Error).message;
+            console.error(`[worker] Failed to refresh Claude for ${account.label}:`, msg);
+            await updateAccountStatus(account.id, 'auth_expired', 0);
+            await createAlert({ id: uuid(), accountId: account.id, provider: 'claude', kind: 'auth_expired', message: `${account.label} — Claude token refresh failed: ${msg}` });
         }
     }
 }

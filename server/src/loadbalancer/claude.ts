@@ -1,90 +1,116 @@
-import { execFile } from 'child_process';
+import axios from 'axios';
 import { Response } from 'express';
 import { ActiveAccount } from '../db/accounts.js';
 
-const CLAUDE_BINARY = process.env.CLAUDE_BINARY ?? 'claude';
+const API_BASE = 'https://api.anthropic.com';
+const ANTHROPIC_VERSION = '2023-06-01';
 const DEFAULT_MODEL = process.env.CLAUDE_DEFAULT_MODEL ?? 'claude-sonnet-4-6';
 
-interface AnthropicMessage {
+interface Message {
     role: string;
     content: string;
 }
 
 interface AnthropicRequest {
     model?: string;
-    messages?: AnthropicMessage[];
+    messages?: Message[];
+    system?: string;
     stream?: boolean;
     max_tokens?: number;
 }
 
-function buildPrompt(messages: AnthropicMessage[]): string {
-    return messages.map(m => {
-        if (m.role === 'system') return `<system>${m.content}</system>`;
-        if (m.role === 'assistant') return `Assistant: ${m.content}`;
-        return m.content;
-    }).join('\n\n');
+function buildHeaders(accessToken: string) {
+    return {
+        'Authorization': `Bearer ${accessToken}`,
+        'anthropic-version': ANTHROPIC_VERSION,
+        'Content-Type': 'application/json',
+    };
 }
 
-export function forwardToClaude(
+function toAnthropicMessages(messages: Message[]): { system?: string; messages: Message[] } {
+    const system = messages.find(m => m.role === 'system')?.content;
+    const rest = messages.filter(m => m.role !== 'system').map(m => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content,
+    }));
+    return { system, messages: rest };
+}
+
+export async function forwardToClaude(
     account: ActiveAccount,
-    anthropicRequest: AnthropicRequest,
+    req: AnthropicRequest,
     res: Response,
-): Promise<{ replyText: string }> {
-    const model = anthropicRequest.model ?? DEFAULT_MODEL;
-    const messages = anthropicRequest.messages ?? [];
-    const isStream = anthropicRequest.stream ?? false;
-    const maxTokens = anthropicRequest.max_tokens ?? 4096;
-    const prompt = buildPrompt(messages);
+): Promise<{ replyText: string; promptTokens?: number; completionTokens?: number }> {
+    if (!account.access_token) throw new Error('No Claude access token on account');
 
-    return new Promise((resolve, reject) => {
-        const env: NodeJS.ProcessEnv = { ...process.env };
-        if (account.access_token) env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = account.access_token;
+    const model = req.model ?? DEFAULT_MODEL;
+    const maxTokens = req.max_tokens ?? 4096;
+    const isStream = req.stream ?? false;
+    const headers = buildHeaders(account.access_token);
+    const { system, messages } = toAnthropicMessages(req.messages ?? []);
 
-        const child = execFile(
-            CLAUDE_BINARY,
-            ['-p', '--output-format', 'json', '--model', model, '--max-tokens', String(maxTokens)],
-            { env, timeout: 120_000 },
-            (err, stdout, stderr) => {
-                if (err) {
-                    const errMsg = stderr || err.message;
-                    if (isStream) {
-                        res.write(`data: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: errMsg } })}\n\n`);
-                        res.end();
-                    } else {
-                        res.status(500).json({ error: { type: 'api_error', message: errMsg } });
-                    }
-                    return reject(new Error(errMsg));
-                }
+    const body: Record<string, unknown> = {
+        model,
+        max_tokens: maxTokens,
+        messages,
+        ...(system ? { system } : {}),
+        ...(isStream ? { stream: true } : {}),
+    };
 
-                let parsed: { result?: string; content?: string } = {};
-                try { parsed = JSON.parse(stdout); } catch { /* ignore */ }
-                const text = parsed.result ?? parsed.content ?? stdout.trim();
-
-                if (isStream) {
-                    res.setHeader('Content-Type', 'text/event-stream');
-                    res.write(`data: ${JSON.stringify({ type: 'message_start', message: { id: `msg_${Date.now()}`, type: 'message', role: 'assistant', model, content: [], stop_reason: null } })}\n\n`);
-                    res.write(`data: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })}\n\n`);
-                    res.write(`data: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })}\n\n`);
-                    res.write(`data: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`);
-                    res.write(`data: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn' } })}\n\n`);
-                    res.write(`data: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
-                    res.end();
-                } else {
-                    res.json({
-                        id: `msg_${Date.now()}`,
-                        type: 'message',
-                        role: 'assistant',
-                        model,
-                        content: [{ type: 'text', text }],
-                        stop_reason: 'end_turn',
-                        usage: { input_tokens: null, output_tokens: null },
-                    });
-                }
-                resolve({ replyText: text });
-            },
+    if (isStream) {
+        const response = await axios.post(
+            `${API_BASE}/v1/messages`,
+            body,
+            { headers, responseType: 'stream', timeout: 120_000 },
         );
 
-        child.stdin?.write(prompt);
-        child.stdin?.end();
-    });
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        let replyText = '';
+
+        return new Promise((resolve, reject) => {
+            response.data.on('data', (chunk: Buffer) => {
+                for (const line of chunk.toString().split('\n')) {
+                    if (!line.startsWith('data: ')) continue;
+                    const data = line.slice(6).trim();
+                    if (!data || data === '[DONE]') continue;
+                    try {
+                        const evt = JSON.parse(data) as {
+                            type?: string;
+                            delta?: { type?: string; text?: string };
+                        };
+                        if (evt.type === 'content_block_delta' && evt.delta?.text) {
+                            replyText += evt.delta.text;
+                        }
+                        // Forward SSE as-is (Anthropic format)
+                        res.write(`data: ${data}\n\n`);
+                    } catch { /* skip malformed */ }
+                }
+            });
+            response.data.on('end', () => { res.end(); resolve({ replyText }); });
+            response.data.on('error', reject);
+        });
+    } else {
+        const response = await axios.post<{
+            id: string;
+            type: string;
+            role: string;
+            model: string;
+            content: { type: string; text: string }[];
+            stop_reason: string;
+            usage?: { input_tokens?: number; output_tokens?: number };
+        }>(`${API_BASE}/v1/messages`, body, { headers, timeout: 120_000 });
+
+        const replyText = response.data.content?.[0]?.text ?? '';
+        const usage = response.data.usage;
+
+        // Forward the full Anthropic response as-is
+        res.json(response.data);
+
+        return {
+            replyText,
+            promptTokens: usage?.input_tokens ?? undefined,
+            completionTokens: usage?.output_tokens ?? undefined,
+        };
+    }
 }

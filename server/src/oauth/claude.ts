@@ -1,52 +1,99 @@
-import fs from 'fs';
-import path from 'path';
+import crypto from 'crypto';
+import axios from 'axios';
 
-const HOMES_DIR = process.env.CLAUDE_HOMES_DIR ?? '/var/gateway/accounts';
+// Claude Code uses a public OAuth client (no secret)
+// Metadata: https://claude.ai/oauth/claude-code-client-metadata
+const CLIENT_ID = 'https://claude.ai/oauth/claude-code-client-metadata';
+const AUTH_URL = 'https://claude.ai/oauth/authorize';
+const TOKEN_URL = 'https://claude.ai/v1/oauth/token';
+// RFC 8252: any port on localhost matches the registered "http://localhost/callback"
+const REDIRECT_URI = 'http://localhost:9475/callback';
+const SCOPES = 'openid profile email claude_code';
 
-export function saveCredentialBlob(accountId: string, blob: string | object): string {
-    const homeDir = path.join(HOMES_DIR, accountId);
-    const claudeDir = path.join(homeDir, '.claude');
-    fs.mkdirSync(claudeDir, { recursive: true });
-
-    const creds = typeof blob === 'string' ? JSON.parse(blob) : blob;
-    fs.writeFileSync(path.join(claudeDir, '.credentials.json'), JSON.stringify(creds, null, 2));
-    return homeDir;
+interface PkceSession {
+    verifier: string;
+    state: string;
+    createdAt: number;
 }
 
-export function getHomeDir(accountId: string): string {
-    return path.join(HOMES_DIR, accountId);
+const sessions = new Map<string, PkceSession>();
+
+function pkce(): { verifier: string; challenge: string } {
+    const verifier = crypto.randomBytes(64).toString('base64url');
+    const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+    return { verifier, challenge };
 }
 
-export function credentialsExist(accountId: string): boolean {
-    return fs.existsSync(path.join(HOMES_DIR, accountId, '.claude', '.credentials.json'));
+export function createSession(): { sessionId: string; authUrl: string } {
+    const sessionId = crypto.randomUUID();
+    const state = crypto.randomBytes(16).toString('base64url');
+    const { verifier, challenge } = pkce();
+
+    sessions.set(sessionId, { verifier, state, createdAt: Date.now() });
+    // Prune expired sessions (15 min)
+    for (const [id, s] of sessions) {
+        if (Date.now() - s.createdAt > 15 * 60_000) sessions.delete(id);
+    }
+
+    const params = new URLSearchParams({
+        client_id: CLIENT_ID,
+        redirect_uri: REDIRECT_URI,
+        response_type: 'code',
+        scope: SCOPES,
+        code_challenge: challenge,
+        code_challenge_method: 'S256',
+        state,
+    });
+
+    return { sessionId, authUrl: `${AUTH_URL}?${params}` };
 }
 
-export function removeCredentials(accountId: string): void {
-    const homeDir = path.join(HOMES_DIR, accountId);
-    if (fs.existsSync(homeDir)) fs.rmSync(homeDir, { recursive: true, force: true });
+export async function exchangeCode(sessionId: string, code: string): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: Date;
+}> {
+    const session = sessions.get(sessionId);
+    if (!session) throw new Error('Session not found or expired');
+    sessions.delete(sessionId);
+
+    const res = await axios.post<{
+        access_token: string;
+        refresh_token?: string;
+        expires_in?: number;
+    }>(TOKEN_URL, new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: CLIENT_ID,
+        code,
+        redirect_uri: REDIRECT_URI,
+        code_verifier: session.verifier,
+    }).toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+
+    const { access_token, refresh_token, expires_in } = res.data;
+    if (!refresh_token) throw new Error('No refresh token received — please re-authenticate');
+
+    return {
+        accessToken: access_token,
+        refreshToken: refresh_token,
+        expiresAt: new Date(Date.now() + (expires_in ?? 3600) * 1000),
+    };
 }
 
-export function getExtractionScript(): string {
-    return `#!/usr/bin/env bash
-# Run this on a machine with Claude Desktop installed and logged in.
-# Paste the output back into the gateway UI.
+export async function refreshClaudeToken(refreshTok: string): Promise<{
+    accessToken: string;
+    expiresAt: Date;
+}> {
+    const res = await axios.post<{
+        access_token: string;
+        expires_in?: number;
+    }>(TOKEN_URL, new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: CLIENT_ID,
+        refresh_token: refreshTok,
+    }).toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
 
-set -e
-
-CREDS_FILE="$HOME/.claude/.credentials.json"
-
-if [ -f "$CREDS_FILE" ]; then
-  cat "$CREDS_FILE"
-elif command -v security &>/dev/null; then
-  RAW=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
-  if [ -n "$RAW" ]; then
-    echo "$RAW"
-  else
-    echo "ERROR: No Claude credentials found. Make sure Claude Code is installed and you are logged in." >&2
-    exit 1
-  fi
-else
-  echo "ERROR: No credentials file found at $CREDS_FILE" >&2
-  exit 1
-fi`;
+    return {
+        accessToken: res.data.access_token,
+        expiresAt: new Date(Date.now() + (res.data.expires_in ?? 3600) * 1000),
+    };
 }

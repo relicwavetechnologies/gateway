@@ -36,6 +36,16 @@ export async function getExpiringGeminiAccounts(threshold: number): Promise<Pick
     `;
 }
 
+export async function getExpiringClaudeAccounts(threshold: number): Promise<Pick<Account, 'id' | 'label'>[]> {
+    return sql<Pick<Account, 'id' | 'label'>[]>`
+        SELECT id, label FROM accounts
+        WHERE provider = 'claude'
+          AND status IN ('active', 'rate_limited')
+          AND oauth_expires_at IS NOT NULL
+          AND oauth_expires_at < ${threshold}
+    `;
+}
+
 export async function createAccount(params: {
     id: string;
     provider: 'openai' | 'claude' | 'gemini';
