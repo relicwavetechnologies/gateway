@@ -1,14 +1,12 @@
 import crypto from 'crypto';
 import axios from 'axios';
 
-// Claude Code uses a public OAuth client (no secret)
-// Metadata: https://claude.ai/oauth/claude-code-client-metadata
-const CLIENT_ID = 'https://claude.ai/oauth/claude-code-client-metadata';
+// Claude Code's OAuth app — same client_id the CLI binary uses (no client secret)
+const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const AUTH_URL = 'https://claude.ai/oauth/authorize';
 const TOKEN_URL = 'https://claude.ai/v1/oauth/token';
-// RFC 8252: any port on localhost matches the registered "http://localhost/callback"
 const REDIRECT_URI = 'http://localhost:9475/callback';
-const SCOPES = 'openid profile email';
+const SCOPES = 'openid profile email claude_code';
 
 interface PkceSession {
     verifier: string;
