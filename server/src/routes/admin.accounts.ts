@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { v4 as uuid } from 'uuid';
 import { requireAdmin } from '../middleware/auth.js';
 import { createSession, exchangeCode } from '../oauth/openai.js';
+import { createSession as createGeminiSession, exchangeCode as exchangeGeminiCode } from '../oauth/gemini.js';
 import { removeCredentials } from '../oauth/claude.js';
 import { createAccount, listAccounts, getAccount, patchAccount, deleteAccount, Account } from '../db/accounts.js';
 
@@ -14,8 +15,8 @@ router.get('/', async (_req, res) => {
 
 router.post('/initiate', (req, res) => {
     const { provider } = req.body as { provider?: string };
-    if (!provider || !['openai', 'claude'].includes(provider)) {
-        res.status(400).json({ error: 'provider must be openai or claude' });
+    if (!provider || !['openai', 'claude', 'gemini'].includes(provider)) {
+        res.status(400).json({ error: 'provider must be openai, claude, or gemini' });
         return;
     }
 
@@ -25,13 +26,19 @@ router.post('/initiate', (req, res) => {
         return;
     }
 
+    if (provider === 'gemini') {
+        const { sessionId, authUrl } = createGeminiSession();
+        res.json({ session_id: sessionId, provider, auth_url: authUrl, instructions: 'Click the link to sign in with your Google account. After login, the browser will redirect to localhost — copy the full URL from the address bar and paste it below.' });
+        return;
+    }
+
     res.json({ session_id: uuid(), provider: 'claude', auth_url: null, instructions: 'Run gateway/scripts/get_claude_token.py on your machine, then paste the access token below.' });
 });
 
 router.post('/complete', async (req, res) => {
     const { session_id, provider, code, credential_blob, label } = req.body as {
         session_id: string;
-        provider: 'openai' | 'claude';
+        provider: 'openai' | 'claude' | 'gemini';
         code?: string;
         credential_blob?: string;
         label?: string;
@@ -41,6 +48,14 @@ router.post('/complete', async (req, res) => {
         if (!code) { res.status(400).json({ error: 'code is required for OpenAI' }); return; }
         const { accessToken, refreshToken, expiresAt } = await exchangeCode(session_id, code);
         const account = await createAccount({ id: uuid(), provider: 'openai', label: label ?? 'OpenAI account', accessToken, refreshToken, expiresAt, createdBy: req.uid });
+        res.json(account);
+        return;
+    }
+
+    if (provider === 'gemini') {
+        if (!code) { res.status(400).json({ error: 'code is required for Gemini' }); return; }
+        const { accessToken, refreshToken, expiresAt } = await exchangeGeminiCode(session_id, code);
+        const account = await createAccount({ id: uuid(), provider: 'gemini', label: label ?? 'Gemini account', accessToken, refreshToken, expiresAt, createdBy: req.uid });
         res.json(account);
         return;
     }
@@ -75,6 +90,24 @@ router.post('/:id/test', async (req, res) => {
             } as unknown as import('express').Response;
 
             await forwardToOpenAI(active, { model: 'gpt-5.4', messages: [{ role: 'user', content: 'say "ok" only' }], stream: false }, fakeRes);
+            res.json({ ok: true, reply });
+            return;
+        }
+
+        if (account.provider === 'gemini') {
+            const { forwardToGemini } = await import('../loadbalancer/gemini.js');
+            const { listActiveAccounts } = await import('../db/accounts.js');
+            const actives = await listActiveAccounts('gemini');
+            const active = actives.find(a => a.id === account.id);
+            if (!active) { res.status(400).json({ error: 'Account not active or no token' }); return; }
+
+            let reply = '';
+            const fakeRes = {
+                setHeader: () => { /* noop */ }, write: () => { /* noop */ }, end: () => { /* noop */ },
+                json: (data: { choices?: { message?: { content?: string } }[] }) => { reply = data.choices?.[0]?.message?.content ?? ''; },
+            } as unknown as import('express').Response;
+
+            await forwardToGemini(active, { model: 'gemini-2.5-flash', messages: [{ role: 'user', content: 'say "ok" only' }], stream: false }, fakeRes);
             res.json({ ok: true, reply });
             return;
         }

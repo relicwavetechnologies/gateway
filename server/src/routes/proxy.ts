@@ -4,13 +4,22 @@ import { requireApiKey } from '../middleware/auth.js';
 import { pickAccount, handleRateLimit, handleAuthError, handleSuccess, handleUnknownError } from '../loadbalancer/index.js';
 import { forwardToOpenAI } from '../loadbalancer/openai.js';
 import { forwardToClaude } from '../loadbalancer/claude.js';
+import { forwardToGemini } from '../loadbalancer/gemini.js';
 import { logUsage, createAlert, getUnEmailedAlerts, markAlertEmailed } from '../db/usage.js';
 import { sendAlert } from '../utils/email.js';
 
 const router = Router();
 router.use(requireApiKey);
 
-async function proxyRequest(provider: 'openai' | 'claude', req: Request, res: Response): Promise<void> {
+function detectProvider(model: string): 'openai' | 'claude' | 'gemini' {
+    if (model.startsWith('gemini-')) return 'gemini';
+    if (model.startsWith('claude-')) return 'claude';
+    return 'openai';
+}
+
+async function proxyRequest(forcedProvider: 'openai' | 'claude' | 'gemini' | null, req: Request, res: Response): Promise<void> {
+    const model = (req.body as { model?: string }).model ?? 'unknown';
+    const provider = forcedProvider ?? detectProvider(model);
     const apiKey = req.apiKey;
     if (!apiKey.allowed_providers.includes(provider)) {
         res.status(403).json({ error: `This API key is not allowed to use ${provider}` });
@@ -31,12 +40,14 @@ async function proxyRequest(provider: 'openai' | 'claude', req: Request, res: Re
     let statusCode = 200;
     let errorMsg: string | null = null;
 
+    const forward = (acct: typeof account) => {
+        if (provider === 'openai') return forwardToOpenAI(acct, req.body, res);
+        if (provider === 'gemini') return forwardToGemini(acct, req.body, res);
+        return forwardToClaude(acct, req.body, res);
+    };
+
     try {
-        if (provider === 'openai') {
-            await forwardToOpenAI(account, req.body, res);
-        } else {
-            await forwardToClaude(account, req.body, res);
-        }
+        await forward(account);
         await handleSuccess(account.id);
     } catch (err: unknown) {
         const axiosErr = err as { response?: { status?: number }; message?: string };
@@ -48,8 +59,7 @@ async function proxyRequest(provider: 'openai' | 'claude', req: Request, res: Re
             await createAlert({ id: uuid(), accountId: account.id, provider, kind: 'rate_limit', message: `Account ${account.label} hit rate limit` });
             try {
                 const fallback = await pickAccount(provider);
-                if (provider === 'openai') await forwardToOpenAI(fallback, req.body, res);
-                else await forwardToClaude(fallback, req.body, res);
+                await forward(fallback);
                 await handleSuccess(fallback.id);
                 statusCode = 200;
                 errorMsg = null;
@@ -72,7 +82,7 @@ async function proxyRequest(provider: 'openai' | 'claude', req: Request, res: Re
             apiKeyId: apiKey.id,
             accountId: account.id,
             provider,
-            model: (req.body as { model?: string }).model ?? 'unknown',
+            model,
             statusCode,
             latencyMs: Date.now() - start,
             error: errorMsg,
@@ -80,7 +90,9 @@ async function proxyRequest(provider: 'openai' | 'claude', req: Request, res: Re
     }
 }
 
-router.post('/chat/completions', (req, res) => proxyRequest('openai', req, res));
+// OpenAI-compatible — auto-routes by model name prefix (gemini-* → Gemini, gpt-* → OpenAI)
+router.post('/chat/completions', (req, res) => proxyRequest(null, req, res));
+// Anthropic-compatible
 router.post('/messages', (req, res) => proxyRequest('claude', req, res));
 
 async function fireAlerts(): Promise<void> {

@@ -1,19 +1,22 @@
 import '../utils/env.js';
-import { getDecryptedTokens, updateAccountTokens, updateAccountStatus, getExpiringOpenAIAccounts, resetExpiredCooldowns } from '../db/accounts.js';
+import { getDecryptedTokens, updateAccountTokens, updateAccountStatus, getExpiringOpenAIAccounts, getExpiringGeminiAccounts, resetExpiredCooldowns } from '../db/accounts.js';
 import { createAlert, markAlertEmailed, getUnEmailedAlerts } from '../db/usage.js';
-import { refreshToken } from '../oauth/openai.js';
+import { refreshToken as refreshOpenAIToken } from '../oauth/openai.js';
+import { refreshGeminiToken } from '../oauth/gemini.js';
 import { sendAlert } from '../utils/email.js';
 import { v4 as uuid } from 'uuid';
 
 const CHECK_INTERVAL_MS = 5 * 60_000;
-const REFRESH_WINDOW_MS = 24 * 60 * 60_000;
+const OPENAI_REFRESH_WINDOW_MS = 24 * 60 * 60_000;
+const GEMINI_REFRESH_WINDOW_MS = 30 * 60_000; // Gemini tokens expire in 1h — refresh within 30min
 
 async function refreshExpiringTokens(): Promise<void> {
-    const threshold = Date.now() + REFRESH_WINDOW_MS;
-    const expiring = await getExpiringOpenAIAccounts(threshold);
+    // OpenAI — refresh 24h before expiry
+    const openaiThreshold = Date.now() + OPENAI_REFRESH_WINDOW_MS;
+    const expiringOpenAI = await getExpiringOpenAIAccounts(openaiThreshold);
 
-    for (const account of expiring) {
-        console.log(`[worker] Refreshing token for ${account.label}`);
+    for (const account of expiringOpenAI) {
+        console.log(`[worker] Refreshing OpenAI token for ${account.label}`);
         const tokens = await getDecryptedTokens(account.id);
         if (!tokens?.refreshToken) {
             console.warn(`[worker] No refresh token for ${account.label} — marking auth_expired`);
@@ -21,16 +24,40 @@ async function refreshExpiringTokens(): Promise<void> {
             await createAlert({ id: uuid(), accountId: account.id, provider: 'openai', kind: 'auth_expired', message: `${account.label} — token expired and no refresh token. Reconnect needed.` });
             continue;
         }
-
         try {
-            const { accessToken, refreshToken: newRefresh, expiresAt } = await refreshToken(tokens.refreshToken);
+            const { accessToken, refreshToken: newRefresh, expiresAt } = await refreshOpenAIToken(tokens.refreshToken);
             await updateAccountTokens(account.id, accessToken, newRefresh, expiresAt);
-            console.log(`[worker] Refreshed token for ${account.label}, expires ${expiresAt}`);
+            console.log(`[worker] Refreshed OpenAI token for ${account.label}, expires ${expiresAt}`);
         } catch (err: unknown) {
             const msg = (err as Error).message;
-            console.error(`[worker] Failed to refresh for ${account.label}:`, msg);
+            console.error(`[worker] Failed to refresh OpenAI for ${account.label}:`, msg);
             await updateAccountStatus(account.id, 'auth_expired', 0);
             await createAlert({ id: uuid(), accountId: account.id, provider: 'openai', kind: 'auth_expired', message: `${account.label} — token refresh failed: ${msg}` });
+        }
+    }
+
+    // Gemini — refresh 30min before expiry (tokens last only 1h)
+    const geminiThreshold = Date.now() + GEMINI_REFRESH_WINDOW_MS;
+    const expiringGemini = await getExpiringGeminiAccounts(geminiThreshold);
+
+    for (const account of expiringGemini) {
+        console.log(`[worker] Refreshing Gemini token for ${account.label}`);
+        const tokens = await getDecryptedTokens(account.id);
+        if (!tokens?.refreshToken) {
+            console.warn(`[worker] No Gemini refresh token for ${account.label} — marking auth_expired`);
+            await updateAccountStatus(account.id, 'auth_expired', 0);
+            await createAlert({ id: uuid(), accountId: account.id, provider: 'gemini', kind: 'auth_expired', message: `${account.label} — Gemini token expired and no refresh token. Reconnect needed.` });
+            continue;
+        }
+        try {
+            const { accessToken, expiresAt } = await refreshGeminiToken(tokens.refreshToken);
+            await updateAccountTokens(account.id, accessToken, tokens.refreshToken, expiresAt);
+            console.log(`[worker] Refreshed Gemini token for ${account.label}, expires ${expiresAt}`);
+        } catch (err: unknown) {
+            const msg = (err as Error).message;
+            console.error(`[worker] Failed to refresh Gemini for ${account.label}:`, msg);
+            await updateAccountStatus(account.id, 'auth_expired', 0);
+            await createAlert({ id: uuid(), accountId: account.id, provider: 'gemini', kind: 'auth_expired', message: `${account.label} — Gemini token refresh failed: ${msg}` });
         }
     }
 }
