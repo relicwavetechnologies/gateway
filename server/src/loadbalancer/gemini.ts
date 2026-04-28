@@ -2,7 +2,7 @@ import axios from 'axios';
 import { Response } from 'express';
 import { ActiveAccount } from '../db/accounts.js';
 
-const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
+const BASE = 'https://cloudcode-pa.googleapis.com/v1internal';
 
 const SUPPORTED_MODELS = new Set([
     'gemini-2.5-pro',
@@ -28,26 +28,32 @@ interface OpenAIRequest {
     max_tokens?: number;
 }
 
-interface GeminiContent {
-    role: string;
-    parts: { text: string }[];
+// Cache project IDs per access token (cleared when token refreshes)
+const projectCache = new Map<string, { projectId: string; fetchedAt: number }>();
+
+async function getProjectId(accessToken: string): Promise<string> {
+    const cached = projectCache.get(accessToken);
+    if (cached && Date.now() - cached.fetchedAt < 25 * 60_000) return cached.projectId; // cache 25min
+
+    const res = await axios.post<{ cloudaicompanionProject?: string }>(
+        `${BASE}:loadCodeAssist`,
+        { metadata: { ideType: 'IDE_UNSPECIFIED', platform: 'PLATFORM_UNSPECIFIED', pluginType: 'GEMINI' } },
+        { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' } },
+    );
+
+    const projectId = res.data.cloudaicompanionProject;
+    if (!projectId) throw new Error('Could not get Gemini project ID from loadCodeAssist');
+
+    projectCache.set(accessToken, { projectId, fetchedAt: Date.now() });
+    return projectId;
 }
 
-function toGeminiContents(messages: OpenAIMessage[]): {
-    contents: GeminiContent[];
-    systemInstruction?: { parts: { text: string }[] };
-} {
+function toGeminiContents(messages: OpenAIMessage[]) {
     const system = messages.find(m => m.role === 'system');
     const rest = messages.filter(m => m.role !== 'system');
-
-    const contents: GeminiContent[] = rest.map(m => ({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }],
-    }));
-
     return {
-        contents,
-        ...(system ? { systemInstruction: { parts: [{ text: system.content }] } } : {}),
+        contents: rest.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
+        systemInstruction: system ? { parts: [{ text: system.content }] } : undefined,
     };
 }
 
@@ -62,25 +68,24 @@ export async function forwardToGemini(
     }
     if (!account.access_token) throw new Error('No Gemini access token on account');
 
+    const projectId = await getProjectId(account.access_token);
     const isStream = openaiRequest.stream ?? false;
     const { contents, systemInstruction } = toGeminiContents(openaiRequest.messages ?? []);
 
-    const payload = {
+    const innerRequest = {
         contents,
         ...(systemInstruction ? { systemInstruction } : {}),
         generationConfig: { maxOutputTokens: openaiRequest.max_tokens ?? 4096 },
     };
 
-    const headers = {
-        Authorization: `Bearer ${account.access_token}`,
-        'Content-Type': 'application/json',
-    };
+    const body = { model, project: projectId, request: innerRequest };
+    const headers = { Authorization: `Bearer ${account.access_token}`, 'Content-Type': 'application/json' };
 
     if (isStream) {
         const response = await axios.post(
-            `${BASE_URL}/${model}:streamGenerateContent?alt=sse`,
-            payload,
-            { headers, responseType: 'stream', timeout: 120_000 },
+            `${BASE}:streamGenerateContent`,
+            body,
+            { headers, params: { alt: 'sse' }, responseType: 'stream', timeout: 120_000 },
         );
 
         res.setHeader('Content-Type', 'text/event-stream');
@@ -89,17 +94,16 @@ export async function forwardToGemini(
 
         return new Promise((resolve, reject) => {
             response.data.on('data', (chunk: Buffer) => {
-                const lines = chunk.toString().split('\n');
-                for (const line of lines) {
+                for (const line of chunk.toString().split('\n')) {
                     if (!line.startsWith('data: ')) continue;
                     const data = line.slice(6).trim();
                     if (!data) continue;
                     try {
                         const evt = JSON.parse(data) as {
-                            candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+                            response?: { candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[] };
                         };
-                        const text = evt.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-                        const done = evt.candidates?.[0]?.finishReason === 'STOP';
+                        const text = evt.response?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+                        const done = evt.response?.candidates?.[0]?.finishReason === 'STOP';
                         if (text) {
                             replyText += text;
                             res.write(`data: ${JSON.stringify({
@@ -118,16 +122,14 @@ export async function forwardToGemini(
         });
     } else {
         const response = await axios.post<{
-            candidates?: { content?: { parts?: { text?: string }[] } }[];
-            usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
-        }>(
-            `${BASE_URL}/${model}:generateContent`,
-            payload,
-            { headers, timeout: 120_000 },
-        );
+            response?: {
+                candidates?: { content?: { parts?: { text?: string }[] } }[];
+                usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+            };
+        }>(`${BASE}:generateContent`, body, { headers, timeout: 120_000 });
 
-        const replyText = response.data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-        const usage = response.data.usageMetadata;
+        const replyText = response.data.response?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        const usage = response.data.response?.usageMetadata;
 
         res.json({
             id: `chatcmpl-${Date.now()}`,
