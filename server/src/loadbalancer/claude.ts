@@ -23,6 +23,8 @@ function buildHeaders(accessToken: string) {
     return {
         'Authorization': `Bearer ${accessToken}`,
         'anthropic-version': ANTHROPIC_VERSION,
+        // Required for OAuth bearer tokens (as opposed to sk-ant- API keys)
+        'anthropic-beta': 'oauth-2025-04-20',
         'Content-Type': 'application/json',
     };
 }

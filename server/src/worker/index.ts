@@ -77,8 +77,9 @@ async function refreshExpiringTokens(): Promise<void> {
             continue;
         }
         try {
-            const { accessToken, expiresAt } = await refreshClaudeToken(tokens.refreshToken);
-            await updateAccountTokens(account.id, accessToken, tokens.refreshToken, expiresAt);
+            const { accessToken, refreshToken: newRefresh, expiresAt } = await refreshClaudeToken(tokens.refreshToken);
+            // Anthropic rotates refresh tokens — store the new one
+            await updateAccountTokens(account.id, accessToken, newRefresh, expiresAt);
             console.log(`[worker] Refreshed Claude token for ${account.label}, expires ${expiresAt}`);
         } catch (err: unknown) {
             const msg = (err as Error).message;

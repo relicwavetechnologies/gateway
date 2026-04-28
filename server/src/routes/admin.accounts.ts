@@ -34,7 +34,7 @@ router.post('/initiate', (req, res) => {
 
     if (provider === 'claude') {
         const { sessionId, authUrl } = createClaudeSession();
-        res.json({ session_id: sessionId, provider, auth_url: authUrl, instructions: 'Click the link to sign in with your Claude.ai account. After login, the browser will redirect to localhost — copy the full URL from the address bar and paste it below.' });
+        res.json({ session_id: sessionId, provider, auth_url: authUrl, instructions: 'Click the link to authorize with your Anthropic account. After you approve access, your browser will land on a console.anthropic.com page — copy the full URL from the address bar and paste it below.' });
         return;
     }
 });

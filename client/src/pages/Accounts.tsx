@@ -58,7 +58,10 @@ const test = useMutation({
     try {
       const u = new URL(url)
       return u.searchParams.get('code') ?? url
-    } catch { return url }
+    } catch {
+      // If it's not a URL, return as-is (user pasted just the code)
+      return url
+    }
   }
 
   return (
@@ -160,11 +163,26 @@ const test = useMutation({
                     {initData.instructions}
                   </div>
                   <a href={initData.auth_url} target="_blank" rel="noreferrer" className="btn-primary w-full flex items-center justify-center gap-2">
-                    Open {provider === 'openai' ? 'OpenAI' : provider === 'gemini' ? 'Google' : 'Claude.ai'} Login ↗
+                    Open {provider === 'openai' ? 'OpenAI' : provider === 'gemini' ? 'Google' : 'Anthropic'} Login ↗
                   </a>
                   <div>
-                    <label className="label">Paste the full callback URL from your browser address bar</label>
-                    <input className="input" placeholder="http://localhost:9475/callback?code=..." value={code} onChange={e => setCode(extractCodeFromUrl(e.target.value))} />
+                    <label className="label">
+                      {provider === 'claude'
+                        ? 'After authorizing, you\'ll land on a console.anthropic.com page — copy the full URL from your browser address bar and paste it here'
+                        : 'Paste the full callback URL from your browser address bar'}
+                    </label>
+                    <input
+                      className="input"
+                      placeholder={
+                        provider === 'claude'
+                          ? 'https://console.anthropic.com/oauth/code/callback?code=...'
+                          : provider === 'gemini'
+                          ? 'http://localhost:9475/callback?code=...'
+                          : 'http://localhost:9475/callback?code=...'
+                      }
+                      value={code}
+                      onChange={e => setCode(extractCodeFromUrl(e.target.value))}
+                    />
                   </div>
                 </div>
               )}
