@@ -1,12 +1,8 @@
 import './utils/env.js';
 import express from 'express';
 import cors from 'cors';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import 'express-async-errors';
 import { initSchema } from './db/index.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 import authRouter from './routes/auth.js';
 import adminAccountsRouter from './routes/admin.accounts.js';
@@ -28,10 +24,6 @@ app.use('/v1', proxyRouter);
 
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// Serve built React client in production
-const clientDist = path.join(__dirname, '../../client/dist');
-app.use(express.static(clientDist));
-app.get('*', (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error('[error]', err.message);
