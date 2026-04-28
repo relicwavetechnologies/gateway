@@ -3,7 +3,7 @@ import { encrypt, decrypt } from '../utils/crypto.js';
 
 export interface Account {
     id: string;
-    provider: 'openai' | 'claude';
+    provider: 'openai' | 'claude' | 'gemini';
     label: string;
     status: 'active' | 'rate_limited' | 'auth_expired' | 'error' | 'disabled';
     access_token_enc: string | null;
@@ -26,9 +26,19 @@ export type PublicAccount = Omit<Account, 'access_token_enc' | 'refresh_token_en
 
 const now = () => Date.now();
 
+export async function getExpiringGeminiAccounts(threshold: number): Promise<Pick<Account, 'id' | 'label'>[]> {
+    return sql<Pick<Account, 'id' | 'label'>[]>`
+        SELECT id, label FROM accounts
+        WHERE provider = 'gemini'
+          AND status IN ('active', 'rate_limited')
+          AND oauth_expires_at IS NOT NULL
+          AND oauth_expires_at < ${threshold}
+    `;
+}
+
 export async function createAccount(params: {
     id: string;
-    provider: 'openai' | 'claude';
+    provider: 'openai' | 'claude' | 'gemini';
     label: string;
     accessToken: string | null;
     refreshToken: string | null;

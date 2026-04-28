@@ -1,6 +1,6 @@
 import { listActiveAccounts, updateAccountStatus, recordAccountSuccess, recordAccountError, ActiveAccount } from '../db/accounts.js';
 
-const counters: Record<string, number> = { openai: 0, claude: 0 };
+const counters: Record<string, number> = { openai: 0, claude: 0, gemini: 0 };
 
 export async function pickAccount(provider: string): Promise<ActiveAccount> {
     const candidates = await listActiveAccounts(provider);

@@ -14,7 +14,7 @@ export async function initSchema(): Promise<void> {
     await sql`
         CREATE TABLE IF NOT EXISTS accounts (
             id                TEXT PRIMARY KEY,
-            provider          TEXT NOT NULL CHECK(provider IN ('openai','claude')),
+            provider          TEXT NOT NULL CHECK(provider IN ('openai','claude','gemini')),
             label             TEXT NOT NULL,
             status            TEXT NOT NULL DEFAULT 'active'
                               CHECK(status IN ('active','rate_limited','auth_expired','error','disabled')),
@@ -81,4 +81,14 @@ export async function initSchema(): Promise<void> {
     await sql`CREATE INDEX IF NOT EXISTS idx_usage_account ON usage_logs(account_id)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_alerts_resolved ON alerts(resolved, last_seen DESC)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_keys_hash ON api_keys(hashed_key)`;
+
+    // Migration: widen provider constraint to include gemini
+    await sql`
+        ALTER TABLE accounts
+        DROP CONSTRAINT IF EXISTS accounts_provider_check
+    `.catch(() => { /* ignore if constraint name differs */ });
+    await sql`
+        ALTER TABLE accounts
+        ADD CONSTRAINT accounts_provider_check CHECK(provider IN ('openai','claude','gemini'))
+    `.catch(() => { /* already correct */ });
 }
