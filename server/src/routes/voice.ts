@@ -70,27 +70,45 @@ async function callLLMText(
         let completionTokens: number | undefined;
 
         if (provider === 'openai') {
-            const res = await axios.post<{
-                choices: { message: { content: string } }[];
-                usage?: { prompt_tokens?: number; completion_tokens?: number };
-            }>('https://chatgpt.com/backend-api/conversation', {
-                model,
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userText },
-                ],
-                temperature: 0.3,
-                stream: false,
-            }, {
-                headers: {
-                    'Authorization': `Bearer ${account.access_token}`,
-                    'Content-Type': 'application/json',
+            const response = await axios.post(
+                'https://chatgpt.com/backend-api/codex/responses',
+                {
+                    model,
+                    instructions: systemPrompt,
+                    input: [{ type: 'message', role: 'user', content: userText }],
+                    tools: [],
+                    tool_choice: 'auto',
+                    parallel_tool_calls: false,
+                    reasoning: { summary: 'auto' },
+                    store: false,
+                    stream: true,
+                    prompt_cache_key: crypto.randomUUID(),
                 },
-                timeout: 30_000,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${account.access_token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    responseType: 'stream',
+                    timeout: 60_000,
+                },
+            );
+            await new Promise<void>((resolve, reject) => {
+                response.data.on('data', (chunk: Buffer) => {
+                    for (const line of chunk.toString().split('\n')) {
+                        if (!line.startsWith('data: ')) continue;
+                        const data = line.slice(6);
+                        if (data === '[DONE]') return;
+                        try {
+                            const evt = JSON.parse(data) as { type: string; delta?: string };
+                            if (evt.type === 'response.output_text.delta') text += evt.delta ?? '';
+                        } catch { /* skip malformed lines */ }
+                    }
+                });
+                response.data.on('end', resolve);
+                response.data.on('error', reject);
             });
-            text = res.data.choices?.[0]?.message?.content?.trim() ?? '';
-            promptTokens = res.data.usage?.prompt_tokens;
-            completionTokens = res.data.usage?.completion_tokens;
+            text = text.trim();
 
         } else if (provider === 'claude') {
             const res = await axios.post<{
