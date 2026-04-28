@@ -7,7 +7,9 @@ export function cn(...inputs: ClassValue[]) {
 
 export function relativeTime(ts: number | string | null) {
   if (!ts) return '—'
-  const diff = Date.now() - new Date(ts).getTime()
+  const t = typeof ts === 'string' ? Number(ts) : ts
+  if (!t || isNaN(t)) return '—'
+  const diff = Date.now() - t
   if (diff < 60_000) return 'just now'
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
