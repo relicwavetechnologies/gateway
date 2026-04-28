@@ -18,10 +18,11 @@ export default function Accounts() {
   const [blob, setBlob] = useState('')
   const [label, setLabel] = useState('')
   const [testResults, setTestResults] = useState<Record<string, any>>({})
+  const [completeError, setCompleteError] = useState<string | null>(null)
 
   const initiate = useMutation({
     mutationFn: () => initiateAccount(provider),
-    onSuccess: (data) => { setInitData(data); setStep('initiated') },
+    onSuccess: (data) => { setInitData(data); setStep('initiated'); setCompleteError(null) },
   })
 
   const complete = useMutation({
@@ -33,6 +34,7 @@ export default function Accounts() {
       label: label || undefined,
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['accounts'] }); reset() },
+    onError: (err: any) => setCompleteError(err?.response?.data?.error ?? err?.message ?? 'Unknown error'),
   })
 
 const test = useMutation({
@@ -51,7 +53,7 @@ const test = useMutation({
     onSuccess: () => qc.invalidateQueries({ queryKey: ['accounts'] }),
   })
 
-  function reset() { setShowModal(false); setStep('idle'); setInitData(null); setCode(''); setBlob(''); setLabel('') }
+  function reset() { setShowModal(false); setStep('idle'); setInitData(null); setCode(''); setBlob(''); setLabel(''); setCompleteError(null) }
 
   function extractCodeFromUrl(url: string) {
     try { return new URL(url).searchParams.get('code') ?? url } catch { return url }
@@ -179,6 +181,18 @@ const test = useMutation({
               )}
             </div>
 
+            {completeError && (
+              <div className="px-6 pb-2">
+                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400 space-y-1">
+                  <p className="font-medium">Connection failed</p>
+                  <p className="font-mono text-xs break-all">{completeError}</p>
+                  {completeError.includes('Session not found') && (
+                    <p className="text-xs text-zinc-400 mt-1">Session expired — click "Start Over" to get a fresh login link.</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="p-6 border-t border-zinc-800 flex justify-end gap-3">
               <button onClick={reset} className="btn-ghost">Cancel</button>
               {step === 'idle' && (
@@ -187,13 +201,20 @@ const test = useMutation({
                 </button>
               )}
               {step === 'initiated' && (
-                <button
-                  onClick={() => complete.mutate()}
-                  disabled={complete.isPending || ((provider === 'openai' || provider === 'gemini') ? !code : !blob)}
-                  className="btn-primary"
-                >
-                  {complete.isPending ? 'Connecting...' : 'Connect Account'}
-                </button>
+                <>
+                  {completeError && (
+                    <button onClick={() => { setCode(''); setBlob(''); setCompleteError(null); initiate.mutate() }} className="btn-ghost">
+                      Start Over
+                    </button>
+                  )}
+                  <button
+                    onClick={() => complete.mutate()}
+                    disabled={complete.isPending || ((provider === 'openai' || provider === 'gemini') ? !code : !blob)}
+                    className="btn-primary"
+                  >
+                    {complete.isPending ? 'Connecting...' : 'Connect Account'}
+                  </button>
+                </>
               )}
             </div>
           </div>
