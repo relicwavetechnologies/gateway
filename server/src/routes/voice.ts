@@ -22,7 +22,7 @@ const MODES: Record<string, { model: string; provider: 'openai' | 'claude' | 'ge
     fast:   { model: 'gpt-5.4-mini',       provider: 'openai' },
     smart:  { model: 'gpt-5.4',            provider: 'openai' },
     claude: { model: 'claude-sonnet-4-6',  provider: 'claude' },
-    gemini: { model: 'gemini-2.5-flash',   provider: 'gemini' },
+    gemini: { model: 'gemini-3.1-flash-lite-preview', provider: 'gemini' },
 };
 
 function resolveMode(mode?: string, model?: string): { model: string; provider: 'openai' | 'claude' | 'gemini' } {
