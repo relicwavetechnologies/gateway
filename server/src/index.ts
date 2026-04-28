@@ -38,6 +38,7 @@ async function main() {
         console.log(`Gateway server running on http://localhost:${PORT}`);
         console.log(`  OpenAI proxy  : POST /v1/chat/completions`);
         console.log(`  Claude proxy  : POST /v1/messages`);
+        // voice route registered at /v1/voice/*
         console.log(`  Voice Polish  : POST /v1/voice/polish  (multipart: audio + mode/lang)`);
         console.log(`  Admin API     : /admin/*`);
     });
