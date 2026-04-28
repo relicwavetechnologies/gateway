@@ -8,7 +8,7 @@ const AUTH_URL = 'https://claude.ai/oauth/authorize';
 const TOKEN_URL = 'https://claude.ai/v1/oauth/token';
 // RFC 8252: any port on localhost matches the registered "http://localhost/callback"
 const REDIRECT_URI = 'http://localhost:9475/callback';
-const SCOPES = 'openid profile email claude_code';
+const SCOPES = 'openid profile email';
 
 interface PkceSession {
     verifier: string;
