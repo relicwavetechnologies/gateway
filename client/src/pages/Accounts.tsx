@@ -11,7 +11,7 @@ export default function Accounts() {
   const { data: accounts = [], isLoading } = useQuery({ queryKey: ['accounts'], queryFn: getAccounts })
 
   const [showModal, setShowModal] = useState(false)
-  const [provider, setProvider] = useState<'openai' | 'claude'>('openai')
+  const [provider, setProvider] = useState<'openai' | 'claude' | 'gemini'>('openai')
   const [step, setStep] = useState<Step>('idle')
   const [initData, setInitData] = useState<any>(null)
   const [code, setCode] = useState('')
@@ -28,7 +28,7 @@ export default function Accounts() {
     mutationFn: () => completeAccount({
       session_id: initData.session_id,
       provider,
-      code: provider === 'openai' ? code : undefined,
+      code: (provider === 'openai' || provider === 'gemini') ? code : undefined,
       credential_blob: provider === 'claude' ? blob : undefined,
       label: label || undefined,
     }),
@@ -83,7 +83,7 @@ const test = useMutation({
         </div>
       ) : (
         <div className="space-y-3">
-          {['openai', 'claude'].map(prov => {
+          {['openai', 'gemini', 'claude'].map(prov => {
             const group = accounts.filter((a: any) => a.provider === prov)
             if (!group.length) return null
             return (
@@ -131,10 +131,10 @@ const test = useMutation({
                 <>
                   <div>
                     <label className="label">Provider</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {(['openai', 'claude'] as const).map(p => (
-                        <button key={p} onClick={() => setProvider(p)} className={cn('px-4 py-3 rounded-lg border text-sm font-medium transition-colors', provider === p ? 'border-brand bg-brand/10 text-brand' : 'border-zinc-700 text-zinc-400 hover:border-zinc-600')}>
-                          {p === 'openai' ? '🤖 OpenAI' : '🧠 Claude'}
+                    <div className="grid grid-cols-3 gap-2">
+                      {(['openai', 'gemini', 'claude'] as const).map(p => (
+                        <button key={p} onClick={() => setProvider(p)} className={cn('px-3 py-3 rounded-lg border text-sm font-medium transition-colors', provider === p ? 'border-brand bg-brand/10 text-brand' : 'border-zinc-700 text-zinc-400 hover:border-zinc-600')}>
+                          {p === 'openai' ? '🤖 OpenAI' : p === 'gemini' ? '✨ Gemini' : '🧠 Claude'}
                         </button>
                       ))}
                     </div>
@@ -146,17 +146,17 @@ const test = useMutation({
                 </>
               )}
 
-              {step === 'initiated' && provider === 'openai' && (
+              {step === 'initiated' && (provider === 'openai' || provider === 'gemini') && (
                 <div className="space-y-4">
-                  <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg text-sm text-blue-300">
+                  <div className={cn('p-3 rounded-lg border text-sm', provider === 'openai' ? 'bg-blue-500/10 border-blue-500/20 text-blue-300' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300')}>
                     {initData.instructions}
                   </div>
                   <a href={initData.auth_url} target="_blank" rel="noreferrer" className="btn-primary w-full flex items-center justify-center gap-2">
-                    Open OpenAI Login ↗
+                    Open {provider === 'openai' ? 'OpenAI' : 'Google'} Login ↗
                   </a>
                   <div>
-                    <label className="label">Paste the callback URL or just the code after login</label>
-                    <input className="input" placeholder="https://localhost:5173/oauth/callback?code=..." value={code} onChange={e => setCode(extractCodeFromUrl(e.target.value))} />
+                    <label className="label">Paste the full callback URL from your browser address bar</label>
+                    <input className="input" placeholder="http://localhost:.../oauth/callback?code=..." value={code} onChange={e => setCode(extractCodeFromUrl(e.target.value))} />
                   </div>
                 </div>
               )}
@@ -189,7 +189,7 @@ const test = useMutation({
               {step === 'initiated' && (
                 <button
                   onClick={() => complete.mutate()}
-                  disabled={complete.isPending || (provider === 'openai' ? !code : !blob)}
+                  disabled={complete.isPending || ((provider === 'openai' || provider === 'gemini') ? !code : !blob)}
                   className="btn-primary"
                 >
                   {complete.isPending ? 'Connecting...' : 'Connect Account'}
