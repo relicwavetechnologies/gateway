@@ -1,7 +1,7 @@
 import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
-const FROM = process.env.ALERT_FROM_EMAIL ?? 'gateway@noreply.com';
+const FROM = process.env.ALERT_FROM_EMAIL ?? 'onboarding@resend.dev';
 const TO = process.env.ALERT_TO_EMAIL ?? '';
 
 interface AlertPayload {
@@ -9,6 +9,18 @@ interface AlertPayload {
     message: string;
     kind: string;
     accountLabel?: string | null;
+}
+
+export async function sendEmail({ to, subject, html }: { to: string; subject: string; html: string }): Promise<{ ok: boolean; error?: string }> {
+    if (!process.env.RESEND_API_KEY) {
+        return { ok: false, error: 'RESEND_API_KEY not set' };
+    }
+    try {
+        await resend.emails.send({ from: FROM, to, subject, html });
+        return { ok: true };
+    } catch (err: unknown) {
+        return { ok: false, error: (err as Error).message };
+    }
 }
 
 export async function sendAlert({ subject, message, kind, accountLabel }: AlertPayload): Promise<void> {
@@ -29,9 +41,6 @@ export async function sendAlert({ subject, message, kind, accountLabel }: AlertP
       <p style="color:#6b7280;font-size:12px;margin-top:24px">Sent by your AI Gateway</p>
     </div>`;
 
-    try {
-        await resend.emails.send({ from: FROM, to: TO, subject, html });
-    } catch (err: unknown) {
-        console.error('[email] Failed to send alert:', (err as Error).message);
-    }
+    const result = await sendEmail({ to: TO, subject, html });
+    if (!result.ok) console.error('[email] Failed to send alert:', result.error);
 }
