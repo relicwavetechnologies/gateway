@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import axios from 'axios';
 
 // Claude Code's OAuth app — same client_id the CLI binary uses (no client secret)
+// platform.claude.com/oauth/authorize works (200); claude.ai/oauth/authorize returns 403
 const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const AUTH_URL = 'https://claude.ai/oauth/authorize';
 const TOKEN_URL = 'https://claude.ai/v1/oauth/token';
@@ -28,7 +29,6 @@ export function createSession(): { sessionId: string; authUrl: string } {
     const { verifier, challenge } = pkce();
 
     sessions.set(sessionId, { verifier, state, createdAt: Date.now() });
-    // Prune expired sessions (15 min)
     for (const [id, s] of sessions) {
         if (Date.now() - s.createdAt > 15 * 60_000) sessions.delete(id);
     }
