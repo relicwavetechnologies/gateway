@@ -61,7 +61,7 @@ export async function forwardToGemini(
     account: ActiveAccount,
     openaiRequest: OpenAIRequest,
     res: Response,
-): Promise<{ replyText: string }> {
+): Promise<{ replyText: string; promptTokens?: number; completionTokens?: number }> {
     const model = openaiRequest.model;
     if (!SUPPORTED_MODELS.has(model)) {
         throw new Error(`Unsupported Gemini model "${model}". Available: ${[...SUPPORTED_MODELS].join(', ')}`);
@@ -142,6 +142,10 @@ export async function forwardToGemini(
                 total_tokens: usage ? (usage.promptTokenCount ?? 0) + (usage.candidatesTokenCount ?? 0) : null,
             },
         });
-        return { replyText };
+        return {
+            replyText,
+            promptTokens: usage?.promptTokenCount ?? undefined,
+            completionTokens: usage?.candidatesTokenCount ?? undefined,
+        };
     }
 }

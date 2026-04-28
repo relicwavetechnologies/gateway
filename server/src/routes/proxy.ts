@@ -39,11 +39,17 @@ async function proxyRequest(forcedProvider: 'openai' | 'claude' | 'gemini' | nul
     const start = Date.now();
     let statusCode = 200;
     let errorMsg: string | null = null;
+    let promptTokens: number | undefined;
+    let completionTokens: number | undefined;
 
-    const forward = (acct: typeof account) => {
-        if (provider === 'openai') return forwardToOpenAI(acct, req.body, res);
-        if (provider === 'gemini') return forwardToGemini(acct, req.body, res);
-        return forwardToClaude(acct, req.body, res);
+    const forward = async (acct: typeof account) => {
+        const result = await (provider === 'openai' ? forwardToOpenAI(acct, req.body, res)
+            : provider === 'gemini' ? forwardToGemini(acct, req.body, res)
+            : forwardToClaude(acct, req.body, res));
+        if (result && 'promptTokens' in result) {
+            promptTokens = (result as any).promptTokens;
+            completionTokens = (result as any).completionTokens;
+        }
     };
 
     try {
@@ -86,6 +92,8 @@ async function proxyRequest(forcedProvider: 'openai' | 'claude' | 'gemini' | nul
             statusCode,
             latencyMs: Date.now() - start,
             error: errorMsg,
+            promptTokens,
+            completionTokens,
         });
     }
 }
