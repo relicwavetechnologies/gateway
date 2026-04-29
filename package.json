@@ -1,6 +1,7 @@
 {
   "name": "gateway",
   "private": true,
+  "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "concurrently -n server,client -c cyan,magenta \"pnpm --filter gateway-server dev\" \"pnpm --filter gateway-client dev\"",
     "build": "pnpm --filter gateway-client build && pnpm --filter gateway-server build",
