@@ -6,3 +6,4 @@ dist/
 dump.rdb
 *.dmg
 .DS_Store
+.claude/
