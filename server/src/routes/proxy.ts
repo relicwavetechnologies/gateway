@@ -29,7 +29,8 @@ async function proxyRequest(forcedProvider: 'openai' | 'claude' | 'gemini' | nul
     let account;
     try {
         account = await pickAccount(provider);
-    } catch {
+    } catch (err: unknown) {
+        console.error(`[proxy] pickAccount failed for ${provider}:`, (err as Error).message, (err as Error).stack);
         await createAlert({ id: uuid(), accountId: null, provider, kind: 'all_down', message: `All ${provider} accounts unavailable` });
         await fireAlerts();
         res.status(503).json({ error: `No ${provider} accounts available. Admin has been notified.` });
