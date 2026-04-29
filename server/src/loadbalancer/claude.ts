@@ -26,8 +26,8 @@ function buildHeaders(accessToken: string) {
     return {
         'Authorization': `Bearer ${accessToken}`,
         'anthropic-version': ANTHROPIC_VERSION,
-        // Both beta flags required for OAuth bearer tokens
-        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
+        // All four beta flags used by OpenClaw/claude-code for OAuth bearer tokens
+        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14',
         'Content-Type': 'application/json',
     };
 }

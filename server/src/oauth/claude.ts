@@ -7,8 +7,8 @@ import axios from 'axios';
 //   https://gist.github.com/changjonathanc/9f9d635b2f8692e0520a884eaf098351
 const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const AUTH_URL = 'https://claude.ai/oauth/authorize';
-// Token exchange goes to console.anthropic.com, NOT claude.ai
-const TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
+// Token exchange goes to platform.claude.com (console.anthropic.com is Cloudflare-blocked for non-browser agents)
+const TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
 // Redirect to Anthropic's own callback page (shows the code to copy — no local server needed)
 const REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback';
 // 'claude_code' scope requires Max plan — use API inference scopes instead
