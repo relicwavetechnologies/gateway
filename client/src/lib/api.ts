@@ -32,6 +32,8 @@ export const completeAccount = (body: object) => api.post('/admin/accounts/compl
 export const testAccount = (id: string) => api.post(`/admin/accounts/${id}/test`).then(r => r.data)
 export const patchAccount = (id: string, body: object) => api.patch(`/admin/accounts/${id}`, body).then(r => r.data)
 export const deleteAccount = (id: string) => api.delete(`/admin/accounts/${id}`).then(r => r.data)
+export const importToken = (body: { provider: string; access_token: string; refresh_token?: string; expires_in?: number; label?: string }) =>
+  api.post('/admin/accounts/import-token', body).then(r => r.data)
 
 // API Keys
 export const getApiKeys = () => api.get('/admin/api-keys').then(r => r.data)

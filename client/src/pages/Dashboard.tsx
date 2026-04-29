@@ -10,14 +10,19 @@ export default function Dashboard() {
 
   const openaiAccounts = accounts.filter((a: any) => a.provider === 'openai')
   const claudeAccounts = accounts.filter((a: any) => a.provider === 'claude')
+  const geminiAccounts = accounts.filter((a: any) => a.provider === 'gemini')
   const activeOpenAI = openaiAccounts.filter((a: any) => a.status === 'active').length
   const activeClaude = claudeAccounts.filter((a: any) => a.status === 'active').length
+  const activeGemini = geminiAccounts.filter((a: any) => a.status === 'active').length
   const unresolvedAlerts = alerts.filter((a: any) => !a.resolved).length
 
-  const stats = [
+  const providerStats = [
     { label: 'OpenAI Accounts', value: `${activeOpenAI} / ${openaiAccounts.length}`, sub: 'active', icon: Server, color: 'text-emerald-400' },
+    { label: 'Gemini Accounts', value: `${activeGemini} / ${geminiAccounts.length}`, sub: 'active', icon: Server, color: 'text-blue-400' },
     { label: 'Claude Accounts', value: `${activeClaude} / ${claudeAccounts.length}`, sub: 'active', icon: Server, color: 'text-violet-400' },
-    { label: "Today's Requests", value: usage?.total_requests ?? '—', sub: `${usage?.total_errors ?? 0} errors`, icon: Activity, color: 'text-blue-400' },
+  ]
+  const systemStats = [
+    { label: "Today's Requests", value: usage?.total_requests ?? '—', sub: `${usage?.total_errors ?? 0} errors`, icon: Activity, color: 'text-brand' },
     { label: 'Open Alerts', value: unresolvedAlerts, sub: unresolvedAlerts > 0 ? 'needs attention' : 'all clear', icon: AlertTriangle, color: unresolvedAlerts > 0 ? 'text-amber-400' : 'text-emerald-400' },
   ]
 
@@ -28,9 +33,24 @@ export default function Dashboard() {
         <p className="text-sm text-zinc-500 mt-1">Overview of your AI Gateway</p>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
-        {stats.map(s => (
+      {/* Provider stats */}
+      <div className="grid grid-cols-3 gap-4">
+        {providerStats.map(s => (
+          <div key={s.label} className="card">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs text-zinc-500 uppercase tracking-wide">{s.label}</p>
+                <p className="text-3xl font-bold text-zinc-100 mt-1">{s.value}</p>
+                <p className="text-xs text-zinc-500 mt-1">{s.sub}</p>
+              </div>
+              <s.icon size={20} className={cn(s.color, 'mt-0.5')} />
+            </div>
+          </div>
+        ))}
+      </div>
+      {/* System stats */}
+      <div className="grid grid-cols-2 gap-4">
+        {systemStats.map(s => (
           <div key={s.label} className="card">
             <div className="flex items-start justify-between">
               <div>
