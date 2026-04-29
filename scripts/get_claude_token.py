@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 # Claude Code's public OAuth client (no secret — PKCE only)
 CLIENT_ID    = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
 AUTH_URL     = 'https://claude.ai/oauth/authorize'
-TOKEN_URL    = 'https://console.anthropic.com/v1/oauth/token'
+TOKEN_URL    = 'https://platform.claude.com/v1/oauth/token'
 PORT         = 53692          # unprivileged port — no sudo needed
 REDIRECT_URI = f'http://localhost:{PORT}/callback'
 SCOPE        = 'org:create_api_key user:profile user:inference'
@@ -49,7 +49,11 @@ def exchange(code, verifier):
     }).encode()
     req = urllib.request.Request(
         TOKEN_URL, data=body,
-        headers={'Content-Type': 'application/json', 'Accept': 'application/json'},
+        headers={
+            'Content-Type': 'application/json',
+            'Accept':       'application/json',
+            'User-Agent':   'claude-cli/1.0.57 (darwin arm64)',
+        },
     )
     with urllib.request.urlopen(req) as r:
         return json.loads(r.read())
