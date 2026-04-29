@@ -124,7 +124,11 @@ export async function updateAccountTokens(id: string, accessToken: string, refre
 export async function patchAccount(id: string, fields: Partial<Pick<Account, 'label' | 'status'>>): Promise<void> {
     const updates: Record<string, unknown> = {};
     if (fields.label !== undefined) updates['label'] = fields.label;
-    if (fields.status !== undefined) updates['status'] = fields.status;
+    if (fields.status !== undefined) {
+        updates['status'] = fields.status;
+        // Clear cooldown when manually reactivating an account
+        if (fields.status === 'active') updates['cooldown_until'] = null;
+    }
     if (!Object.keys(updates).length) return;
     await sql`UPDATE accounts SET ${sql(updates)} WHERE id = ${id}`;
 }
