@@ -73,6 +73,36 @@ router.post('/complete', async (req, res) => {
     res.status(400).json({ error: 'Invalid provider' });
 });
 
+// Direct token import — for tokens obtained via the standalone get_claude_token.py script
+router.post('/import-token', async (req, res) => {
+    const { provider, access_token, refresh_token, expires_in, label } = req.body as {
+        provider: 'openai' | 'claude' | 'gemini';
+        access_token: string;
+        refresh_token?: string;
+        expires_in?: number;
+        label?: string;
+    };
+
+    if (!provider || !['openai', 'claude', 'gemini'].includes(provider)) {
+        res.status(400).json({ error: 'provider must be openai, claude, or gemini' }); return;
+    }
+    if (!access_token) {
+        res.status(400).json({ error: 'access_token is required' }); return;
+    }
+
+    const expiresAt = new Date(Date.now() + (expires_in ?? 3600) * 1000);
+    const account = await createAccount({
+        id: uuid(),
+        provider,
+        label: label ?? `${provider} account`,
+        accessToken: access_token,
+        refreshToken: refresh_token ?? '',
+        expiresAt,
+        createdBy: req.uid,
+    });
+    res.json(account);
+});
+
 router.post('/:id/test', async (req, res) => {
     const account = await getAccount(req.params.id);
     if (!account) { res.status(404).json({ error: 'Account not found' }); return; }
