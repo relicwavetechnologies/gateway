@@ -7,7 +7,7 @@ import { cn, relativeTime } from '../lib/utils'
 const MODELS: Record<string, { label: string; models: string[] }> = {
   openai: {
     label: '🤖 OpenAI',
-    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex'],
+    models: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex'],
   },
   gemini: {
     label: '✨ Gemini',
@@ -25,7 +25,12 @@ const MODELS: Record<string, { label: string; models: string[] }> = {
   },
   claude: {
     label: '🧠 Claude',
-    models: ['claude-opus-4-5', 'claude-sonnet-4-6', 'claude-haiku-3-5'],
+    models: [
+      'claude-opus-4-7',       // Opus 4.7 — latest flagship
+      'claude-sonnet-4-6',     // Sonnet 4.6 — balanced (default)
+      'claude-haiku-4-5',      // Haiku 4.5 — fast & cheap
+      'claude-opus-4-6',       // Opus 4.6 — legacy
+    ],
   },
 }
 
