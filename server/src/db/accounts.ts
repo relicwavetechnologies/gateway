@@ -87,10 +87,18 @@ export async function listActiveAccounts(provider: string): Promise<ActiveAccoun
           AND status = 'active'
           AND (cooldown_until IS NULL OR cooldown_until < ${now()})
     `;
-    return rows.map(row => ({
-        ...sanitize(row),
-        access_token: row.access_token_enc ? decrypt(row.access_token_enc) : null,
-    }));
+    const results: ActiveAccount[] = [];
+    for (const row of rows) {
+        try {
+            results.push({
+                ...sanitize(row),
+                access_token: row.access_token_enc ? decrypt(row.access_token_enc) : null,
+            });
+        } catch {
+            console.error(`[accounts] decrypt failed for account ${row.id} (${row.label}) — skipping. Re-add this account.`);
+        }
+    }
+    return results;
 }
 
 export async function updateAccountStatus(id: string, status: Account['status'], cooldownMinutes = 0): Promise<void> {
