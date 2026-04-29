@@ -11,6 +11,9 @@ services:
       - "4000"
     networks:
       - gateway
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/health"]
       interval: 30s
@@ -40,6 +43,9 @@ services:
       - caddy_config:/config
     networks:
       - gateway
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     depends_on:
       - api
       - web
