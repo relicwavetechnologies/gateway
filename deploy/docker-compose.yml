@@ -1,0 +1,53 @@
+name: gateway
+
+services:
+  api:
+    image: ghcr.io/relicwavetechnologies/gateway-api:${IMAGE_TAG:-latest}
+    container_name: gateway-api
+    restart: unless-stopped
+    env_file:
+      - /etc/gateway/gateway.env
+    expose:
+      - "4000"
+    networks:
+      - gateway
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web:
+    image: ghcr.io/relicwavetechnologies/gateway-web:${IMAGE_TAG:-latest}
+    container_name: gateway-web
+    restart: unless-stopped
+    expose:
+      - "80"
+    networks:
+      - gateway
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: gateway-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - gateway
+    depends_on:
+      - api
+      - web
+
+networks:
+  gateway:
+    name: gateway
+
+volumes:
+  caddy_data:
+  caddy_config:

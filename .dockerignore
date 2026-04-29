@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/.tsbuildinfo
+**/*.tsbuildinfo
+.git
+.github
+.claude
+**/.env
+**/.env.local
+**/.env.*.local
+*.dmg
+dump.rdb
+.DS_Store
+README*.md

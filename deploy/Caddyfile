@@ -1,0 +1,23 @@
+{
+    email admin@outreachdeal.com
+}
+
+gateway.outreachdeal.com {
+    encode gzip zstd
+
+    @api {
+        path /auth* /admin* /v1* /health
+    }
+    handle @api {
+        reverse_proxy api:4000
+    }
+
+    handle {
+        reverse_proxy web:80
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}
