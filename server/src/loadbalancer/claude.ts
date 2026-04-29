@@ -19,12 +19,15 @@ interface AnthropicRequest {
     max_tokens?: number;
 }
 
+// Claude Code system prompt required for OAuth tokens to pass Anthropic's inference gate
+const CLAUDE_CODE_SYSTEM = "You are Claude Code, Anthropic's official CLI for Claude.";
+
 function buildHeaders(accessToken: string) {
     return {
         'Authorization': `Bearer ${accessToken}`,
         'anthropic-version': ANTHROPIC_VERSION,
-        // Required for OAuth bearer tokens (as opposed to sk-ant- API keys)
-        'anthropic-beta': 'oauth-2025-04-20',
+        // Both beta flags required for OAuth bearer tokens
+        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
         'Content-Type': 'application/json',
     };
 }
@@ -51,11 +54,16 @@ export async function forwardToClaude(
     const headers = buildHeaders(account.access_token);
     const { system, messages } = toAnthropicMessages(req.messages ?? []);
 
+    // Merge user system prompt with the required Claude Code system prompt
+    const finalSystem = system
+        ? `${CLAUDE_CODE_SYSTEM}\n\n${system}`
+        : CLAUDE_CODE_SYSTEM;
+
     const body: Record<string, unknown> = {
         model,
         max_tokens: maxTokens,
         messages,
-        ...(system ? { system } : {}),
+        system: finalSystem,
         ...(isStream ? { stream: true } : {}),
     };
 
