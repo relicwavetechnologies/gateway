@@ -24,7 +24,7 @@ RUN pnpm --filter gateway-client build \
 
 # ── Produce a self-contained server bundle (prod deps only) ──────────────────
 FROM build AS api-deploy
-RUN pnpm deploy --filter=gateway-server --prod --legacy /out
+RUN pnpm deploy --filter=gateway-server --prod /out
 
 # ── Final API image ──────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION} AS api
