@@ -29,7 +29,7 @@ const MODELS: Record<string, { label: string; models: string[] }> = {
   },
 }
 
-const GATEWAY_URL = window.location.origin
+const GATEWAY_URL = (import.meta.env.VITE_API_URL ?? window.location.origin).replace(/\/$/, '')
 
 function buildCurl(provider: string, model: string, apiKey: string) {
   const key = apiKey || 'cnsc_gw_xxxx'
