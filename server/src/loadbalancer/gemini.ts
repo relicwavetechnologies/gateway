@@ -15,16 +15,15 @@ const LOAD_CODE_ASSIST_METADATA = {
 };
 
 const SUPPORTED_MODELS = new Set([
+    // Gemini 2.5 family
     'gemini-2.5-pro',
     'gemini-2.5-flash',
     'gemini-2.5-flash-lite',
-    'gemini-2.5-flash-base',
+    // Gemini 3 family
     'gemini-3.1-pro-preview',
     'gemini-3.1-flash-lite-preview',
     'gemini-3-pro-preview',
     'gemini-3-flash-preview',
-    'gemini-3-flash-lite-preview',
-    'gemini-3-flash-base',
 ]);
 
 interface OpenAIMessage {
@@ -267,6 +266,11 @@ export async function forwardToGemini(
         // cloudcode-pa non-stream response: { response: { candidates, usageMetadata } }
         const replyText = response.data.response?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
         const usage = response.data.response?.usageMetadata;
+
+        // Empty reply = Gemini soft-throttle (free-tier silent rate limit) — let proxy retry
+        if (!replyText) {
+            throw Object.assign(new Error('empty_response'), { response: { status: 429 } });
+        }
 
         res.json({
             id: `chatcmpl-${Date.now()}`,
