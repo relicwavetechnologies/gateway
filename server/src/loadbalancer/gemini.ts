@@ -15,17 +15,21 @@ const LOAD_CODE_ASSIST_METADATA = {
     pluginType: 'GEMINI',
 };
 
-const SUPPORTED_MODELS = new Set([
-    // Gemini 2.5 family
-    'gemini-2.5-pro',
-    'gemini-2.5-flash',
-    'gemini-2.5-flash-lite',
-    // Gemini 3 family
-    'gemini-3.1-pro-preview',
-    'gemini-3.1-flash-lite-preview',
-    'gemini-3-pro-preview',
-    'gemini-3-flash-preview',
-]);
+// ─── Model normalisation (mirrors OpenClaw's normalizeGoogleModelId) ──────────
+// No hard-coded allowlist — unknown models pass straight through and Google
+// returns the error. Aliases expand short names to the canonical API names.
+const MODEL_ALIASES: Record<string, string> = {
+    'gemini-3-pro':           'gemini-3-pro-preview',
+    'gemini-3-flash':         'gemini-3-flash-preview',
+    'gemini-3-flash-lite':    'gemini-3-flash-lite-preview',
+    'gemini-3.1-pro':         'gemini-3.1-pro-preview',
+    'gemini-3.1-flash':       'gemini-3-flash-preview',
+    'gemini-3.1-flash-lite':  'gemini-3.1-flash-lite-preview',
+};
+
+function normalizeModel(model: string): string {
+    return MODEL_ALIASES[model] ?? model;
+}
 
 interface OpenAIMessage {
     role: string;
@@ -210,9 +214,11 @@ export async function forwardToGemini(
     openaiRequest: OpenAIRequest,
     res: Response,
 ): Promise<{ replyText: string; promptTokens?: number; completionTokens?: number }> {
-    const model = openaiRequest.model;
-    if (!SUPPORTED_MODELS.has(model)) {
-        throw new Error(`Unsupported Gemini model "${model}". Available: ${[...SUPPORTED_MODELS].join(', ')}`);
+    // Normalize aliases (e.g. gemini-3-flash → gemini-3-flash-preview).
+    // No allowlist — unknown models pass through; Google returns the error.
+    const model = normalizeModel(openaiRequest.model);
+    if (model !== openaiRequest.model) {
+        console.log(`[gemini] model alias: ${openaiRequest.model} → ${model}`);
     }
 
     // ── Proactive token refresh (OpenClaw pattern) ────────────────────────────
