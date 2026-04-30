@@ -13,7 +13,7 @@ import {
 } from '../loadbalancer/index.js';
 import { forwardToOpenAI } from '../loadbalancer/openai.js';
 import { forwardToClaude } from '../loadbalancer/claude.js';
-import { forwardToGemini } from '../loadbalancer/gemini.js';
+import { forwardToGemini, isProModel, MIN_PRO_ACCOUNTS, LITE_MODELS } from '../loadbalancer/gemini.js';
 import { logUsage, createAlert, getUnEmailedAlerts, markAlertEmailed } from '../db/usage.js';
 import { sendAlert } from '../utils/email.js';
 import type { ActiveAccount } from '../db/accounts.js';
@@ -69,6 +69,17 @@ async function proxyRequest(
         await createAlert({ id: uuid(), accountId: null, provider, kind: 'all_down', message: `All ${provider} accounts unavailable` });
         await fireAlerts();
         res.status(503).json({ error: `No ${provider} accounts available. Admin has been notified.` });
+        return;
+    }
+
+    // ── Gemini pro-model gate ─────────────────────────────────────────────────
+    // Pro models burn through free-tier quota instantly with a small account pool.
+    // Require MIN_PRO_ACCOUNTS active accounts before serving them.
+    if (provider === 'gemini' && isProModel(model) && accounts.length < MIN_PRO_ACCOUNTS) {
+        res.status(503).json({
+            error: `This model requires ${MIN_PRO_ACCOUNTS}+ active Gemini accounts (currently ${accounts.length}). `
+                 + `Available models: ${LITE_MODELS.join(', ')}`,
+        });
         return;
     }
 

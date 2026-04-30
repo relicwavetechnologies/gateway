@@ -27,8 +27,35 @@ const MODEL_ALIASES: Record<string, string> = {
     'gemini-3.1-flash-lite':  'gemini-3.1-flash-lite-preview',
 };
 
-function normalizeModel(model: string): string {
+export function normalizeGeminiModel(model: string): string {
     return MODEL_ALIASES[model] ?? model;
+}
+
+// ─── Model tier gating ────────────────────────────────────────────────────────
+// Pro-tier models are heavy — Google's free quota gets exhausted fast with a
+// small account pool. Gate them behind a minimum account threshold so users
+// always get a clear "not enough accounts" message instead of a cryptic 429.
+//
+// Lite / flash models are always open — they have generous per-minute quotas.
+
+const PRO_MODELS = new Set([
+    'gemini-2.5-pro',
+    'gemini-3-pro-preview',
+    'gemini-3.1-pro-preview',
+]);
+
+// Minimum active accounts required to serve pro-tier models
+export const MIN_PRO_ACCOUNTS = 3;
+
+export const LITE_MODELS = [
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-3-flash-preview',
+    'gemini-3.1-flash-lite-preview',
+] as const;
+
+export function isProModel(model: string): boolean {
+    return PRO_MODELS.has(normalizeGeminiModel(model));
 }
 
 interface OpenAIMessage {
@@ -216,7 +243,7 @@ export async function forwardToGemini(
 ): Promise<{ replyText: string; promptTokens?: number; completionTokens?: number }> {
     // Normalize aliases (e.g. gemini-3-flash → gemini-3-flash-preview).
     // No allowlist — unknown models pass through; Google returns the error.
-    const model = normalizeModel(openaiRequest.model);
+    const model = normalizeGeminiModel(openaiRequest.model);
     if (model !== openaiRequest.model) {
         console.log(`[gemini] model alias: ${openaiRequest.model} → ${model}`);
     }
