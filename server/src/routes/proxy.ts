@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid';
 import { requireApiKey } from '../middleware/auth.js';
 import {
     getAllAccounts,
+    getAllAccountsIncludingCooldown,
     handleRateLimit,
     handleAuthError,
     handleServerError,
@@ -54,9 +55,12 @@ async function proxyRequest(
     }
 
     // ── Load all healthy accounts upfront ────────────────────────────────────
+    // First try fresh (not on cooldown). If none available, fall back to
+    // cooldown accounts too — better to try a slightly throttled account
+    // than to fail immediately.
     let accounts: ActiveAccount[];
     try {
-        accounts = await getAllAccounts(provider);
+        accounts = await getAllAccountsIncludingCooldown(provider);
     } catch {
         accounts = [];
     }
@@ -109,7 +113,7 @@ async function proxyRequest(
             if (res.headersSent) break;
 
             if (kind === 'rate_limit') {
-                await handleRateLimit(account.id, account.error_count + 1);
+                await handleRateLimit(account.id);
                 await createAlert({ id: uuid(), accountId: account.id, provider, kind: 'rate_limit', message: `Account ${account.label} hit rate limit` });
                 console.log(`[proxy] rate limited ${account.label}, trying next account...`);
                 continue; // try next account
