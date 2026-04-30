@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { Response } from 'express';
-import { ActiveAccount } from '../db/accounts.js';
+import { ActiveAccount, getDecryptedTokens, updateAccountTokens } from '../db/accounts.js';
+import { refreshGeminiToken } from '../oauth/gemini.js';
 
 // ─── Endpoints ────────────────────────────────────────────────────────────────
 // Gemini CLI OAuth tokens use cloudcode-pa (NOT generativelanguage.googleapis.com).
@@ -159,7 +160,51 @@ function toGeminiContents(messages: OpenAIMessage[]) {
     };
 }
 
-// ─── Inference ────────────────────────────────────────────────────────────────
+// ─── Inline token refresh + Inference ────────────────────────────────────────
+// Mirrors the OpenClaw pattern: check expiry with a 5-min buffer BEFORE the
+// request so we never hit a 401 from a stale token. On 401 we also attempt
+// one reactive refresh and retry, giving full coverage.
+const REFRESH_MARGIN_MS = 5 * 60_000;
+
+async function getFreshToken(account: ActiveAccount): Promise<string> {
+    if (!account.access_token) throw new Error('No Gemini access token on account');
+
+    const expiresAt = account.oauth_expires_at ? Number(account.oauth_expires_at) : null;
+    const needsRefresh = expiresAt !== null && expiresAt - Date.now() < REFRESH_MARGIN_MS;
+
+    if (!needsRefresh) return account.access_token;
+
+    console.log(`[gemini] token for ${account.label} expires in <5 min — refreshing proactively`);
+    const stored = await getDecryptedTokens(account.id);
+    if (!stored?.refreshToken) {
+        console.warn(`[gemini] no refresh token for ${account.label} — using stale token`);
+        return account.access_token;
+    }
+
+    try {
+        const { accessToken, expiresAt: newExpiry } = await refreshGeminiToken(stored.refreshToken);
+        await updateAccountTokens(account.id, accessToken, stored.refreshToken, newExpiry);
+        console.log(`[gemini] proactively refreshed token for ${account.label}, new expiry ${newExpiry.toISOString()}`);
+        return accessToken;
+    } catch (err: unknown) {
+        console.warn(`[gemini] proactive refresh failed for ${account.label}:`, (err as Error).message, '— using existing token');
+        return account.access_token;
+    }
+}
+
+async function tryRefreshOn401(account: ActiveAccount): Promise<string | null> {
+    const stored = await getDecryptedTokens(account.id).catch(() => null);
+    if (!stored?.refreshToken) return null;
+    try {
+        const { accessToken, expiresAt } = await refreshGeminiToken(stored.refreshToken);
+        await updateAccountTokens(account.id, accessToken, stored.refreshToken, expiresAt);
+        console.log(`[gemini] reactive refresh after 401 for ${account.label}, new expiry ${expiresAt.toISOString()}`);
+        return accessToken;
+    } catch {
+        return null;
+    }
+}
+
 export async function forwardToGemini(
     account: ActiveAccount,
     openaiRequest: OpenAIRequest,
@@ -169,10 +214,12 @@ export async function forwardToGemini(
     if (!SUPPORTED_MODELS.has(model)) {
         throw new Error(`Unsupported Gemini model "${model}". Available: ${[...SUPPORTED_MODELS].join(', ')}`);
     }
-    if (!account.access_token) throw new Error('No Gemini access token on account');
+
+    // ── Proactive token refresh (OpenClaw pattern) ────────────────────────────
+    let accessToken = await getFreshToken(account);
 
     // Discover / provision the project ID (cached after first call)
-    const projectId = await discoverProjectId(account.access_token);
+    const projectId = await discoverProjectId(accessToken);
 
     const isStream = openaiRequest.stream ?? false;
     const { contents, systemInstruction } = toGeminiContents(openaiRequest.messages ?? []);
@@ -185,12 +232,14 @@ export async function forwardToGemini(
     };
     const body = { model, project: projectId, request: innerRequest };
 
-    const headers = {
-        'Authorization': `Bearer ${account.access_token}`,
+    const makeHeaders = (token: string) => ({
+        'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
         'User-Agent': 'google-api-nodejs-client/9.15.1',
         'X-Goog-Api-Client': `gl-node/${process.versions.node}`,
-    };
+    });
+
+    let headers = makeHeaders(accessToken);
 
     if (isStream) {
         const url = `${CODE_ASSIST_BASE}/v1internal:streamGenerateContent`;
@@ -250,17 +299,37 @@ export async function forwardToGemini(
         const url = `${CODE_ASSIST_BASE}/v1internal:generateContent`;
         console.log('[gemini] non-stream →', url, '| project:', projectId);
 
+        type GeminiResponse = {
+            response?: {
+                candidates?: { content?: { parts?: { text?: string }[] } }[];
+                usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+            };
+        };
+
         let response;
         try {
-            response = await axios.post<{
-                response?: {
-                    candidates?: { content?: { parts?: { text?: string }[] } }[];
-                    usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
-                };
-            }>(url, body, { headers, timeout: 120_000 });
+            response = await axios.post<GeminiResponse>(url, body, { headers, timeout: 120_000 });
         } catch (err: any) {
-            console.error('[gemini] generateContent error:', err.response?.status, JSON.stringify(err.response?.data));
-            throw err;
+            // ── Reactive 401 refresh (token may have slipped through proactive check) ──
+            if (err.response?.status === 401) {
+                console.log(`[gemini] 401 on ${account.label} — attempting reactive token refresh`);
+                const fresh = await tryRefreshOn401(account);
+                if (fresh) {
+                    headers = makeHeaders(fresh);
+                    try {
+                        response = await axios.post<GeminiResponse>(url, body, { headers, timeout: 120_000 });
+                    } catch (retryErr: any) {
+                        console.error('[gemini] retry after refresh also failed:', retryErr.response?.status, JSON.stringify(retryErr.response?.data));
+                        throw retryErr;
+                    }
+                } else {
+                    console.error('[gemini] reactive refresh failed — no refresh token or refresh rejected');
+                    throw err;
+                }
+            } else {
+                console.error('[gemini] generateContent error:', err.response?.status, JSON.stringify(err.response?.data));
+                throw err;
+            }
         }
 
         // cloudcode-pa non-stream response: { response: { candidates, usageMetadata } }
