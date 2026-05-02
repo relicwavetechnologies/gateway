@@ -71,12 +71,14 @@ export async function pickAccount(provider: string): Promise<ActiveAccount> {
 
 // ─── Get all usable accounts for a provider ───────────────────────────────────
 // Returns active DB accounts that are not on in-memory cooldown,
-// sorted by health (best first).
+// sorted by health (best first), then round-robin rotated so successive
+// requests spread evenly across all healthy accounts.
 export async function getAllAccounts(provider: string): Promise<ActiveAccount[]> {
     const all = await listActiveAccounts(provider);
-    return all
+    const fresh = all
         .filter(a => !isOnCooldown(a.id))
         .sort((a, b) => healthScore(a) - healthScore(b));
+    return roundRobin(provider, fresh);
 }
 
 // Also include cooldown accounts as last-resort fallback
@@ -84,7 +86,17 @@ export async function getAllAccountsIncludingCooldown(provider: string): Promise
     const all = await listActiveAccounts(provider);
     const fresh = all.filter(a => !isOnCooldown(a.id)).sort((a, b) => healthScore(a) - healthScore(b));
     const cooled = all.filter(a => isOnCooldown(a.id)).sort((a, b) => healthScore(a) - healthScore(b));
-    return [...fresh, ...cooled];
+    // Round-robin the fresh pool; cooled accounts stay at the end as last resort
+    return [...roundRobin(provider, fresh), ...cooled];
+}
+
+// Rotate the list so each request starts at a different account.
+// With 10 accounts: req1 → [A,B,C...], req2 → [B,C,D...], req3 → [C,D,E...]
+function roundRobin(provider: string, accounts: ActiveAccount[]): ActiveAccount[] {
+    if (accounts.length <= 1) return accounts;
+    const offset = counters[provider] % accounts.length;
+    counters[provider] = (counters[provider] + 1) % Number.MAX_SAFE_INTEGER;
+    return [...accounts.slice(offset), ...accounts.slice(0, offset)];
 }
 
 // ─── Status mutations ─────────────────────────────────────────────────────────
