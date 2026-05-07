@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { getAccounts, getUsage, getAlerts } from '../lib/api'
-import { Server, Key, AlertTriangle, Activity, CheckCircle2, XCircle } from 'lucide-react'
-import { cn, relativeTime, statusColor } from '../lib/utils'
+import { Server, AlertTriangle, Activity, XCircle } from 'lucide-react'
+import { cn, relativeTime, statusColor, timeUntil } from '../lib/utils'
 
 export default function Dashboard() {
   const { data: accounts = [] } = useQuery({ queryKey: ['accounts'], queryFn: getAccounts, refetchInterval: 15_000 })
@@ -12,12 +12,14 @@ export default function Dashboard() {
   const claudeAccounts = accounts.filter((a: any) => a.provider === 'claude')
   const geminiAccounts = accounts.filter((a: any) => a.provider === 'gemini')
   const activeOpenAI = openaiAccounts.filter((a: any) => a.status === 'active').length
+  const activeOpenAIPro = openaiAccounts.filter((a: any) => a.status === 'active' && a.account_tier === 'pro').length
+  const coolingOpenAI = openaiAccounts.filter((a: any) => a.status === 'rate_limited').length
   const activeClaude = claudeAccounts.filter((a: any) => a.status === 'active').length
   const activeGemini = geminiAccounts.filter((a: any) => a.status === 'active').length
   const unresolvedAlerts = alerts.filter((a: any) => !a.resolved).length
 
   const providerStats = [
-    { label: 'OpenAI Accounts', value: `${activeOpenAI} / ${openaiAccounts.length}`, sub: 'active', icon: Server, color: 'text-emerald-400' },
+    { label: 'OpenAI Accounts', value: `${activeOpenAI} / ${openaiAccounts.length}`, sub: `${activeOpenAIPro} pro active · ${coolingOpenAI} cooling`, icon: Server, color: 'text-emerald-400' },
     { label: 'Gemini Accounts', value: `${activeGemini} / ${geminiAccounts.length}`, sub: 'active', icon: Server, color: 'text-blue-400' },
     { label: 'Claude Accounts', value: `${activeClaude} / ${claudeAccounts.length}`, sub: 'active', icon: Server, color: 'text-violet-400' },
   ]
@@ -34,7 +36,7 @@ export default function Dashboard() {
       </div>
 
       {/* Provider stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {providerStats.map(s => (
           <div key={s.label} className="card">
             <div className="flex items-start justify-between">
@@ -49,7 +51,7 @@ export default function Dashboard() {
         ))}
       </div>
       {/* System stats */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {systemStats.map(s => (
           <div key={s.label} className="card">
             <div className="flex items-start justify-between">
@@ -72,12 +74,25 @@ export default function Dashboard() {
         ) : (
           <div className="divide-y divide-zinc-800">
             {accounts.map((a: any) => (
-              <div key={a.id} className="flex items-center justify-between py-3">
-                <div className="flex items-center gap-3">
-                  <div className={cn('w-2 h-2 rounded-full', a.status === 'active' ? 'bg-emerald-400' : 'bg-red-400')} />
-                  <div>
-                    <p className="text-sm text-zinc-100">{a.label}</p>
-                    <p className="text-xs text-zinc-500">{a.provider} · {a.request_count} requests · last used {relativeTime(a.last_used_at)}</p>
+              <div key={a.id} className="flex items-center justify-between gap-4 py-3">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className={cn('w-2 h-2 rounded-full mt-1.5 shrink-0', a.status === 'active' ? 'bg-emerald-400' : a.status === 'rate_limited' ? 'bg-amber-400' : 'bg-red-400')} />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-zinc-100 truncate">{a.label}</p>
+                      {a.provider === 'openai' && (
+                        <span className={cn('badge text-[10px] uppercase', a.account_tier === 'pro' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 bg-zinc-800 text-zinc-400')}>
+                          {a.account_tier ?? 'free'}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-zinc-500">{a.provider} · {a.request_count} requests · {a.error_count} errors · last used {relativeTime(a.last_used_at)}</p>
+                    {a.status === 'rate_limited' && a.cooldown_until && (
+                      <p className="text-xs text-amber-400 mt-1">Cooling down for {timeUntil(a.cooldown_until)}</p>
+                    )}
+                    {a.last_error && (
+                      <p className="text-xs text-zinc-500 mt-1 truncate">Last error: {a.last_error}</p>
+                    )}
                   </div>
                 </div>
                 <span className={cn('badge', statusColor(a.status))}>{a.status.replace('_', ' ')}</span>

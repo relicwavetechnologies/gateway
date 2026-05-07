@@ -5,6 +5,7 @@ export interface Account {
     id: string;
     provider: 'openai' | 'claude' | 'gemini';
     label: string;
+    account_tier: 'free' | 'pro';
     status: 'active' | 'rate_limited' | 'auth_expired' | 'error' | 'disabled';
     access_token_enc: string | null;
     refresh_token_enc: string | null;
@@ -54,12 +55,13 @@ export async function createAccount(params: {
     refreshToken: string | null;
     expiresAt: Date | null;
     createdBy: string;
+    accountTier?: 'free' | 'pro';
 }): Promise<PublicAccount> {
-    const { id, provider, label, accessToken, refreshToken, expiresAt, createdBy } = params;
+    const { id, provider, label, accessToken, refreshToken, expiresAt, createdBy, accountTier = 'free' } = params;
     const [row] = await sql<Account[]>`
-        INSERT INTO accounts (id, provider, label, access_token_enc, refresh_token_enc, oauth_expires_at, created_at, created_by)
+        INSERT INTO accounts (id, provider, label, account_tier, access_token_enc, refresh_token_enc, oauth_expires_at, created_at, created_by)
         VALUES (
-            ${id}, ${provider}, ${label},
+            ${id}, ${provider}, ${label}, ${accountTier},
             ${accessToken ? encrypt(accessToken) : null},
             ${refreshToken ? encrypt(refreshToken) : null},
             ${expiresAt ? expiresAt.getTime() : null},
@@ -84,7 +86,10 @@ export async function listActiveAccounts(provider: string): Promise<ActiveAccoun
     const rows = await sql<Account[]>`
         SELECT * FROM accounts
         WHERE provider = ${provider}
-          AND status = 'active'
+          AND (
+              status = 'active'
+              OR (status = 'rate_limited' AND cooldown_until IS NOT NULL AND cooldown_until < ${now()})
+          )
           AND (cooldown_until IS NULL OR cooldown_until < ${now()})
     `;
     const results: ActiveAccount[] = [];
@@ -106,8 +111,27 @@ export async function updateAccountStatus(id: string, status: Account['status'],
     await sql`UPDATE accounts SET status = ${status}, cooldown_until = ${cooldown_until} WHERE id = ${id}`;
 }
 
+export async function markAccountRateLimited(id: string, cooldownUntil: number, error: string): Promise<void> {
+    await sql`
+        UPDATE accounts
+        SET status = 'rate_limited',
+            cooldown_until = ${cooldownUntil},
+            error_count = error_count + 1,
+            last_error = ${error},
+            last_used_at = ${now()}
+        WHERE id = ${id}
+    `;
+}
+
 export async function recordAccountSuccess(id: string): Promise<void> {
-    await sql`UPDATE accounts SET request_count = request_count + 1, last_used_at = ${now()} WHERE id = ${id}`;
+    await sql`
+        UPDATE accounts
+        SET request_count = request_count + 1,
+            last_used_at = ${now()},
+            status = CASE WHEN status = 'rate_limited' THEN 'active' ELSE status END,
+            cooldown_until = CASE WHEN status = 'rate_limited' THEN NULL ELSE cooldown_until END
+        WHERE id = ${id}
+    `;
 }
 
 export async function recordAccountError(id: string, error: string): Promise<void> {
@@ -124,14 +148,16 @@ export async function updateAccountTokens(id: string, accessToken: string, refre
         SET access_token_enc = ${encrypt(accessToken)},
             refresh_token_enc = ${refreshToken ? encrypt(refreshToken) : null},
             oauth_expires_at = ${expiresAt ? expiresAt.getTime() : null},
-            status = 'active'
+            status = 'active',
+            cooldown_until = NULL
         WHERE id = ${id}
     `;
 }
 
-export async function patchAccount(id: string, fields: Partial<Pick<Account, 'label' | 'status'>>): Promise<void> {
+export async function patchAccount(id: string, fields: Partial<Pick<Account, 'label' | 'status' | 'account_tier'>>): Promise<void> {
     const updates: Record<string, unknown> = {};
     if (fields.label !== undefined) updates['label'] = fields.label;
+    if (fields.account_tier !== undefined) updates['account_tier'] = fields.account_tier;
     if (fields.status !== undefined) {
         updates['status'] = fields.status;
         // Clear cooldown when manually reactivating an account

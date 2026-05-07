@@ -16,6 +16,8 @@ export async function initSchema(): Promise<void> {
             id                TEXT PRIMARY KEY,
             provider          TEXT NOT NULL CHECK(provider IN ('openai','claude','gemini')),
             label             TEXT NOT NULL,
+            account_tier      TEXT NOT NULL DEFAULT 'free'
+                              CHECK(account_tier IN ('free','pro')),
             status            TEXT NOT NULL DEFAULT 'active'
                               CHECK(status IN ('active','rate_limited','auth_expired','error','disabled')),
             access_token_enc  TEXT,
@@ -81,6 +83,20 @@ export async function initSchema(): Promise<void> {
     await sql`CREATE INDEX IF NOT EXISTS idx_usage_account ON usage_logs(account_id)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_alerts_resolved ON alerts(resolved, last_seen DESC)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_keys_hash ON api_keys(hashed_key)`;
+
+    await sql`
+        ALTER TABLE accounts
+        ADD COLUMN IF NOT EXISTS account_tier TEXT NOT NULL DEFAULT 'free'
+    `;
+
+    await sql`
+        ALTER TABLE accounts
+        DROP CONSTRAINT IF EXISTS accounts_account_tier_check
+    `.catch(() => { /* ignore if constraint name differs */ });
+    await sql`
+        ALTER TABLE accounts
+        ADD CONSTRAINT accounts_account_tier_check CHECK(account_tier IN ('free','pro'))
+    `.catch(() => { /* already correct */ });
 
     // Migration: widen provider constraint to include gemini
     await sql`

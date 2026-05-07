@@ -16,6 +16,18 @@ export function relativeTime(ts: number | string | null) {
   return `${Math.floor(diff / 86_400_000)}d ago`
 }
 
+export function timeUntil(ts: number | string | null) {
+  if (!ts) return '—'
+  const t = typeof ts === 'string' ? Number(ts) : ts
+  if (!t || isNaN(t)) return '—'
+  const diff = t - Date.now()
+  if (diff <= 0) return 'ready now'
+  if (diff < 60_000) return `${Math.ceil(diff / 1000)}s`
+  if (diff < 3_600_000) return `${Math.ceil(diff / 60_000)}m`
+  if (diff < 86_400_000) return `${Math.ceil(diff / 3_600_000)}h`
+  return `${Math.ceil(diff / 86_400_000)}d`
+}
+
 export function statusColor(status: string) {
   switch (status) {
     case 'active': return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'

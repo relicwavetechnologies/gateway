@@ -45,13 +45,14 @@ router.post('/complete', async (req, res) => {
         provider: 'openai' | 'claude' | 'gemini';
         code?: string;
         label?: string;
+        account_tier?: 'free' | 'pro';
     };
 
     if (!code) { res.status(400).json({ error: 'code is required' }); return; }
 
     if (provider === 'openai') {
         const { accessToken, refreshToken, expiresAt } = await exchangeCode(session_id, code);
-        const account = await createAccount({ id: uuid(), provider: 'openai', label: label ?? 'OpenAI account', accessToken, refreshToken, expiresAt, createdBy: req.uid });
+        const account = await createAccount({ id: uuid(), provider: 'openai', label: label ?? 'OpenAI account', accessToken, refreshToken, expiresAt, createdBy: req.uid, accountTier: req.body.account_tier ?? 'free' });
         res.json(account);
         return;
     }
@@ -81,6 +82,7 @@ router.post('/import-token', async (req, res) => {
         refresh_token?: string;
         expires_in?: number;
         label?: string;
+        account_tier?: 'free' | 'pro';
     };
 
     if (!provider || !['openai', 'claude', 'gemini'].includes(provider)) {
@@ -99,6 +101,7 @@ router.post('/import-token', async (req, res) => {
         refreshToken: refresh_token ?? '',
         expiresAt,
         createdBy: req.uid,
+        accountTier: req.body.account_tier ?? 'free',
     });
     res.json(account);
 });
@@ -160,8 +163,12 @@ router.post('/:id/test', async (req, res) => {
 });
 
 router.patch('/:id', async (req, res) => {
-    const { label, status } = req.body as { label?: string; status?: Account['status'] };
-    await patchAccount(req.params.id, { label, status });
+    const { label, status, account_tier } = req.body as { label?: string; status?: Account['status']; account_tier?: Account['account_tier'] };
+    if (account_tier && !['free', 'pro'].includes(account_tier)) {
+        res.status(400).json({ error: 'account_tier must be free or pro' });
+        return;
+    }
+    await patchAccount(req.params.id, { label, status, account_tier });
     res.json(await getAccount(req.params.id));
 });
 
