@@ -178,11 +178,14 @@ async function callLLMText(
         return { text, promptTokens, completionTokens, accountId: account.id };
 
     } catch (err: unknown) {
-        const axiosErr = err as { response?: { status?: number }; message?: string };
+        const axiosErr = err as { response?: { status?: number; data?: unknown }; message?: string };
         const status = axiosErr.response?.status ?? 500;
-        if (status === 429) await handleRateLimit(account.id);
+        const message = typeof axiosErr.response?.data === 'string'
+            ? axiosErr.response.data
+            : axiosErr.message ?? 'unknown';
+        if (status === 429) await handleRateLimit(account, message);
         else if (status === 401) await handleAuthError(account.id);
-        else await handleUnknownError(account.id, axiosErr.message ?? 'unknown');
+        else await handleUnknownError(account.id, message);
         throw err;
     }
 }

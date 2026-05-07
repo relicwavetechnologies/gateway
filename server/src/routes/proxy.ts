@@ -29,6 +29,35 @@ function detectProvider(model: string): 'openai' | 'claude' | 'gemini' {
 
 type ForwardResult = { replyText: string; promptTokens?: number; completionTokens?: number };
 
+function providerErrorMessage(err: { response?: { data?: unknown }; message?: string; code?: string }): string {
+    const data = err.response?.data;
+
+    if (Buffer.isBuffer(data)) return data.toString('utf8').slice(0, 800);
+    if (typeof data === 'string' && data.trim()) return data.slice(0, 800);
+
+    if (data && typeof data === 'object') {
+        const body = data as {
+            error?: string | { message?: string; type?: string; code?: string };
+            message?: string;
+            detail?: string;
+        };
+
+        if (typeof body.error === 'string') return body.error.slice(0, 800);
+        if (body.error && typeof body.error === 'object') {
+            const pieces = [body.error.code, body.error.type, body.error.message].filter(Boolean);
+            if (pieces.length) return pieces.join(': ').slice(0, 800);
+        }
+        if (body.message) return body.message.slice(0, 800);
+        if (body.detail) return body.detail.slice(0, 800);
+
+        try {
+            return JSON.stringify(data).slice(0, 800);
+        } catch { /* fall through */ }
+    }
+
+    return (err.message || err.code || 'Unknown error').slice(0, 800);
+}
+
 async function callProvider(
     provider: 'openai' | 'claude' | 'gemini',
     account: ActiveAccount,
@@ -86,6 +115,7 @@ async function proxyRequest(
     const start = Date.now();
     let finalStatusCode = 200;
     let finalError: string | null = null;
+    let finalErrorKind: ReturnType<typeof classifyError> | null = null;
     let promptTokens: number | undefined;
     let completionTokens: number | undefined;
     let lastUsedAccountId = accounts[0].id;
@@ -112,20 +142,22 @@ async function proxyRequest(
         } catch (err: unknown) {
             const axiosErr = err as { response?: { status?: number; data?: unknown }; message?: string; code?: string };
             const statusCode = axiosErr.response?.status ?? 0;
-            const message = axiosErr.message ?? 'Unknown error';
+            const message = providerErrorMessage(axiosErr);
             const kind = classifyError(statusCode, message);
 
             console.error(`[proxy] ${provider}/${account.label} failed — ${statusCode} ${kind}: ${message}`);
 
             finalStatusCode = statusCode || 500;
             finalError = message;
+            finalErrorKind = kind;
 
             // If response is already sent (streaming started), stop here
             if (res.headersSent) break;
 
             if (kind === 'rate_limit') {
-                await handleRateLimit(account.id);
-                await createAlert({ id: uuid(), accountId: account.id, provider, kind: 'rate_limit', message: `Account ${account.label} hit rate limit` });
+                const cooldownUntil = await handleRateLimit(account, message);
+                const cooldownText = cooldownUntil ? ` until ${new Date(cooldownUntil).toISOString()}` : '';
+                await createAlert({ id: uuid(), accountId: account.id, provider, kind: 'rate_limit', message: `Account ${account.label} hit rate limit${cooldownText}: ${message}` });
                 console.log(`[proxy] rate limited ${account.label}, trying next account...`);
                 continue; // try next account
 
@@ -159,7 +191,7 @@ async function proxyRequest(
 
     // ── All accounts exhausted ────────────────────────────────────────────────
     if (!succeeded && !res.headersSent) {
-        const allRateLimited = finalError === 'rate_limited' || finalStatusCode === 429;
+        const allRateLimited = finalErrorKind === 'rate_limit' || finalStatusCode === 429;
         const allAuthExpired = finalStatusCode === 401;
 
         if (allRateLimited) {

@@ -3,6 +3,7 @@ import {
     updateAccountStatus,
     recordAccountSuccess,
     recordAccountError,
+    markAccountRateLimited,
     ActiveAccount,
 } from '../db/accounts.js';
 
@@ -20,6 +21,10 @@ const inMemoryCooldown = new Map<string, number>();
 
 // Consecutive failure streak per account — resets on success, drives backoff.
 const consecutiveFailures = new Map<string, number>();
+
+const OPENAI_FREE_RATE_LIMIT_COOLDOWN_MS = 7 * 24 * 60 * 60_000;
+const OPENAI_PRO_RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 60_000;
+const OPENAI_PRO_PRIORITY_BONUS_MS = 7 * 24 * 60 * 60_000;
 
 // ─── Cooldown helpers ─────────────────────────────────────────────────────────
 
@@ -82,10 +87,15 @@ function accountPriority(account: ActiveAccount): number {
     const requests = Number(account.request_count ?? 0);
     const errors   = Number(account.error_count   ?? 0);
     const errorPenalty = requests >= 5 ? (errors / requests) * 60_000 : 0;
+    const tierBonus = account.provider === 'openai' && account.account_tier === 'pro'
+        ? OPENAI_PRO_PRIORITY_BONUS_MS
+        : 0;
 
     // Negative idle: longer idle → more negative → lower score → picked first.
     // Error penalty: more errors → larger positive → higher score → picked last.
-    return -idleMs + errorPenalty;
+    // Tier bonus: OpenAI pro accounts should absorb most traffic before free
+    // accounts are used, while still preserving LRU ordering inside each tier.
+    return -idleMs + errorPenalty - tierBonus;
 }
 
 // ─── Account selectors ────────────────────────────────────────────────────────
@@ -126,16 +136,35 @@ export async function pickAccount(provider: string): Promise<ActiveAccount> {
 
 // ─── Status mutations ─────────────────────────────────────────────────────────
 
-export async function handleRateLimit(accountId: string): Promise<void> {
-    const failures = (consecutiveFailures.get(accountId) ?? 0) + 1;
-    consecutiveFailures.set(accountId, failures);
+export async function handleRateLimit(account: ActiveAccount, error: string): Promise<number | null> {
+    const accountId = account.id;
+
+    if (account.provider === 'openai') {
+        const cooldownMs = account.account_tier === 'pro'
+            ? OPENAI_PRO_RATE_LIMIT_COOLDOWN_MS
+            : OPENAI_FREE_RATE_LIMIT_COOLDOWN_MS;
+        const cooldownUntil = Date.now() + cooldownMs;
+
+        consecutiveFailures.delete(accountId);
+        lastAssigned.delete(accountId);
+        inMemoryCooldown.delete(accountId);
+        await markAccountRateLimited(accountId, cooldownUntil, error);
+
+        console.log(
+            `[lb] openai rate limit: ${accountId} (${account.account_tier}) — cooldown until ${new Date(cooldownUntil).toISOString()}`,
+        );
+        return cooldownUntil;
+    }
 
     // Exponential backoff: 10s → 20s → 40s → 80s → 120s cap.
     // Jitter (built into setCooldown) desynchronises concurrent expirations.
+    const failures = (consecutiveFailures.get(accountId) ?? 0) + 1;
+    consecutiveFailures.set(accountId, failures);
     const seconds = Math.min(10 * Math.pow(2, failures - 1), 120);
     setCooldown(accountId, seconds);
-    await recordAccountError(accountId, 'rate_limited');
+    await recordAccountError(accountId, error);
     console.log(`[lb] rate limit: ${accountId} — cooldown ${seconds.toFixed(0)}s (failure #${failures})`);
+    return Date.now() + seconds * 1_000;
 }
 
 export async function handleAuthError(accountId: string): Promise<void> {

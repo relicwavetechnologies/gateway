@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getAccounts, initiateAccount, completeAccount, importToken, testAccount, patchAccount, deleteAccount } from '../lib/api'
-import { Plus, Trash2, TestTube2, Power, Copy, CheckCircle2, Terminal, ChevronRight } from 'lucide-react'
-import { cn, relativeTime, statusColor } from '../lib/utils'
+import { Plus, Trash2, TestTube2, Power, Copy, CheckCircle2, Terminal } from 'lucide-react'
+import { absoluteTime, cn, relativeTime, statusColor, timeUntil } from '../lib/utils'
 
 type Step = 'idle' | 'initiated' | 'completing'
 type OS = 'mac' | 'windows'
@@ -113,6 +113,7 @@ export default function Accounts() {
   const [initData, setInitData] = useState<any>(null)
   const [code, setCode] = useState('')
   const [label, setLabel] = useState('')
+  const [accountTier, setAccountTier] = useState<'free' | 'pro'>('free')
   const [testResults, setTestResults] = useState<Record<string, any>>({})
   const [completeError, setCompleteError] = useState<string | null>(null)
 
@@ -120,7 +121,6 @@ export default function Accounts() {
   const [os, setOs] = useState<OS>('mac')
   const [claudeAccessToken, setClaudeAccessToken] = useState('')
   const [claudeRefreshToken, setClaudeRefreshToken] = useState('')
-  const [scriptStep, setScriptStep] = useState<1 | 2 | 3>(1)
 
   const initiate = useMutation({
     mutationFn: () => initiateAccount(provider),
@@ -128,7 +128,13 @@ export default function Accounts() {
   })
 
   const complete = useMutation({
-    mutationFn: () => completeAccount({ session_id: initData.session_id, provider, code: code || undefined, label: label || undefined }),
+    mutationFn: () => completeAccount({
+      session_id: initData.session_id,
+      provider,
+      code: code || undefined,
+      label: label || undefined,
+      account_tier: provider === 'openai' ? accountTier : undefined,
+    }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['accounts'] }); reset() },
     onError: (err: any) => setCompleteError(err?.response?.data?.error ?? err?.message ?? 'Unknown error'),
   })
@@ -163,7 +169,8 @@ export default function Accounts() {
 
   function reset() {
     setShowModal(false); setStep('idle'); setInitData(null); setCode(''); setLabel('')
-    setCompleteError(null); setClaudeAccessToken(''); setClaudeRefreshToken(''); setScriptStep(1)
+    setAccountTier('free')
+    setCompleteError(null); setClaudeAccessToken(''); setClaudeRefreshToken('')
   }
 
   function extractCodeFromUrl(url: string) {
@@ -211,12 +218,30 @@ export default function Accounts() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-zinc-100">{a.label}</p>
                         <p className="text-xs text-zinc-500">{Number(a.request_count).toLocaleString()} requests · {a.error_count} errors · last used {relativeTime(a.last_used_at)}</p>
+                        {a.status === 'rate_limited' && a.cooldown_until && (
+                          <p className="text-xs text-amber-400 mt-1">Available in {timeUntil(a.cooldown_until)} · {absoluteTime(a.cooldown_until)}</p>
+                        )}
+                        {a.status === 'rate_limited' && !a.cooldown_until && (
+                          <p className="text-xs text-red-400 mt-1">No automatic reset scheduled</p>
+                        )}
+                        {a.last_error && (
+                          <p className="text-xs text-zinc-500 mt-1 truncate">Last error: {a.last_error}</p>
+                        )}
                         {testResults[a.id] && (
                           <p className={cn('text-xs mt-1', testResults[a.id].ok ? 'text-emerald-400' : 'text-red-400')}>
                             {testResults[a.id].ok ? `✓ ${testResults[a.id].reply}` : `✗ ${testResults[a.id].error}`}
                           </p>
                         )}
                       </div>
+                      {a.provider === 'openai' && (
+                        <button
+                          onClick={() => patch.mutate({ id: a.id, body: { account_tier: a.account_tier === 'pro' ? 'free' : 'pro' } })}
+                          className={cn('badge uppercase text-[10px]', a.account_tier === 'pro' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 bg-zinc-800 text-zinc-400')}
+                          title="Toggle OpenAI account tier"
+                        >
+                          {a.account_tier ?? 'free'}
+                        </button>
+                      )}
                       <span className={cn('badge', statusColor(a.status))}>{a.status.replace('_', ' ')}</span>
                       <div className="flex items-center gap-1">
                         <button onClick={() => test.mutate(a.id)} disabled={test.isPending} className="btn-ghost p-2" title="Test"><TestTube2 size={14} /></button>
@@ -264,6 +289,23 @@ export default function Accounts() {
                     <label className="label">Label <span className="text-zinc-600">(optional)</span></label>
                     <input className="input" placeholder="e.g. My main account" value={label} onChange={e => setLabel(e.target.value)} />
                   </div>
+                  {provider === 'openai' && (
+                    <div>
+                      <label className="label">OpenAI tier</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(['free', 'pro'] as const).map(t => (
+                          <button
+                            key={t}
+                            onClick={() => setAccountTier(t)}
+                            className={cn('px-3 py-2 rounded-lg border text-sm font-medium uppercase transition-colors',
+                              accountTier === t ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 text-zinc-400 hover:border-zinc-600')}
+                          >
+                            {t}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
 
