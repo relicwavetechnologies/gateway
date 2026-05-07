@@ -28,6 +28,18 @@ export function timeUntil(ts: number | string | null) {
   return `${Math.ceil(diff / 86_400_000)}d`
 }
 
+export function absoluteTime(ts: number | string | null) {
+  if (!ts) return '—'
+  const t = typeof ts === 'string' ? Number(ts) : ts
+  if (!t || isNaN(t)) return '—'
+  return new Date(t).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 export function statusColor(status: string) {
   switch (status) {
     case 'active': return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'

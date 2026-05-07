@@ -4,12 +4,13 @@ import { requireAdmin } from '../middleware/auth.js';
 import { createSession, exchangeCode } from '../oauth/openai.js';
 import { createSession as createGeminiSession, exchangeCode as exchangeGeminiCode } from '../oauth/gemini.js';
 import { createSession as createClaudeSession, exchangeCode as exchangeClaudeCode } from '../oauth/claude.js';
-import { createAccount, listAccounts, getAccount, patchAccount, deleteAccount, Account } from '../db/accounts.js';
+import { createAccount, listAccounts, getAccount, patchAccount, deleteAccount, resetExpiredCooldowns, Account } from '../db/accounts.js';
 
 const router = Router();
 router.use(requireAdmin);
 
 router.get('/', async (_req, res) => {
+    await resetExpiredCooldowns();
     res.json(await listAccounts());
 });
 

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getAccounts, initiateAccount, completeAccount, importToken, testAccount, patchAccount, deleteAccount } from '../lib/api'
 import { Plus, Trash2, TestTube2, Power, Copy, CheckCircle2, Terminal } from 'lucide-react'
-import { cn, relativeTime, statusColor, timeUntil } from '../lib/utils'
+import { absoluteTime, cn, relativeTime, statusColor, timeUntil } from '../lib/utils'
 
 type Step = 'idle' | 'initiated' | 'completing'
 type OS = 'mac' | 'windows'
@@ -219,7 +219,10 @@ export default function Accounts() {
                         <p className="text-sm font-medium text-zinc-100">{a.label}</p>
                         <p className="text-xs text-zinc-500">{Number(a.request_count).toLocaleString()} requests · {a.error_count} errors · last used {relativeTime(a.last_used_at)}</p>
                         {a.status === 'rate_limited' && a.cooldown_until && (
-                          <p className="text-xs text-amber-400 mt-1">Cooldown expires in {timeUntil(a.cooldown_until)}</p>
+                          <p className="text-xs text-amber-400 mt-1">Available in {timeUntil(a.cooldown_until)} · {absoluteTime(a.cooldown_until)}</p>
+                        )}
+                        {a.status === 'rate_limited' && !a.cooldown_until && (
+                          <p className="text-xs text-red-400 mt-1">No automatic reset scheduled</p>
                         )}
                         {a.last_error && (
                           <p className="text-xs text-zinc-500 mt-1 truncate">Last error: {a.last_error}</p>
