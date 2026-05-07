@@ -2,6 +2,8 @@ import axios from 'axios';
 import { Response } from 'express';
 import { ActiveAccount, getDecryptedTokens, updateAccountTokens } from '../db/accounts.js';
 import { refreshGeminiToken } from '../oauth/gemini.js';
+import { invalidateAccountPool } from '../cache/hotpath.js';
+import { logLatency } from '../utils/timing.js';
 
 // ─── Endpoints ────────────────────────────────────────────────────────────────
 // Gemini CLI OAuth tokens use cloudcode-pa (NOT generativelanguage.googleapis.com).
@@ -215,6 +217,7 @@ async function getFreshToken(account: ActiveAccount): Promise<string> {
     try {
         const { accessToken, expiresAt: newExpiry } = await refreshGeminiToken(stored.refreshToken);
         await updateAccountTokens(account.id, accessToken, stored.refreshToken, newExpiry);
+        invalidateAccountPool('gemini');
         console.log(`[gemini] proactively refreshed token for ${account.label}, new expiry ${newExpiry.toISOString()}`);
         return accessToken;
     } catch (err: unknown) {
@@ -229,6 +232,7 @@ async function tryRefreshOn401(account: ActiveAccount): Promise<string | null> {
     try {
         const { accessToken, expiresAt } = await refreshGeminiToken(stored.refreshToken);
         await updateAccountTokens(account.id, accessToken, stored.refreshToken, expiresAt);
+        invalidateAccountPool('gemini');
         console.log(`[gemini] reactive refresh after 401 for ${account.label}, new expiry ${expiresAt.toISOString()}`);
         return accessToken;
     } catch {
@@ -277,12 +281,14 @@ export async function forwardToGemini(
     if (isStream) {
         const url = `${CODE_ASSIST_BASE}/v1internal:streamGenerateContent`;
         console.log('[gemini] stream →', url, '| project:', projectId);
+        const upstreamStart = Date.now();
         const response = await axios.post(url, body, {
             headers,
             params: { alt: 'sse' },
             responseType: 'stream',
             timeout: 120_000,
         });
+        logLatency('gemini', 'headers', upstreamStart, `account=${account.id}`);
 
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
@@ -290,7 +296,12 @@ export async function forwardToGemini(
 
         return new Promise((resolve, reject) => {
             let buffer = '';
+            let sawFirstByte = false;
             response.data.on('data', (chunk: Buffer) => {
+                if (!sawFirstByte) {
+                    sawFirstByte = true;
+                    logLatency('gemini', 'first_byte', upstreamStart, `account=${account.id}`);
+                }
                 buffer += chunk.toString();
                 const lines = buffer.split('\n');
                 buffer = lines.pop() ?? '';
@@ -325,7 +336,11 @@ export async function forwardToGemini(
                     } catch { /* skip malformed SSE chunks */ }
                 }
             });
-            response.data.on('end', () => { res.end(); resolve({ replyText }); });
+            response.data.on('end', () => {
+                logLatency('gemini', 'complete', upstreamStart, `account=${account.id}`);
+                res.end();
+                resolve({ replyText });
+            });
             response.data.on('error', reject);
         });
     } else {
@@ -340,6 +355,7 @@ export async function forwardToGemini(
         };
 
         let response;
+        const upstreamStart = Date.now();
         try {
             response = await axios.post<GeminiResponse>(url, body, { headers, timeout: 120_000 });
         } catch (err: any) {
@@ -364,6 +380,7 @@ export async function forwardToGemini(
                 throw err;
             }
         }
+        logLatency('gemini', 'complete', upstreamStart, `account=${account.id}`);
 
         // cloudcode-pa non-stream response: { response: { candidates, usageMetadata } }
         const replyText = response.data.response?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';

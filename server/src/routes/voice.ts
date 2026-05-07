@@ -184,7 +184,7 @@ async function callLLMText(
             ? axiosErr.response.data
             : axiosErr.message ?? 'unknown';
         if (status === 429) await handleRateLimit(account, message);
-        else if (status === 401) await handleAuthError(account.id);
+        else if (status === 401) await handleAuthError(account.id, provider);
         else await handleUnknownError(account.id, message);
         throw err;
     }

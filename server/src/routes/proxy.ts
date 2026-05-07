@@ -17,6 +17,7 @@ import { forwardToGemini, isProModel, MIN_PRO_ACCOUNTS, LITE_MODELS } from '../l
 import { logUsage, createAlert, getUnEmailedAlerts, markAlertEmailed } from '../db/usage.js';
 import { sendAlert } from '../utils/email.js';
 import type { ActiveAccount } from '../db/accounts.js';
+import { logLatency } from '../utils/timing.js';
 
 const router = Router();
 router.use(requireApiKey);
@@ -130,7 +131,9 @@ async function proxyRequest(
         lastUsedAccountId = account.id;
 
         try {
+            const providerStart = Date.now();
             const result = await callProvider(provider, account, req.body, res);
+            logLatency('proxy', 'provider_complete', providerStart, `provider=${provider} account=${account.id}`);
             promptTokens = result.promptTokens;
             completionTokens = result.completionTokens;
 
@@ -162,7 +165,7 @@ async function proxyRequest(
                 continue; // try next account
 
             } else if (kind === 'auth_expired') {
-                await handleAuthError(account.id);
+                await handleAuthError(account.id, provider);
                 await createAlert({ id: uuid(), accountId: account.id, provider, kind: 'auth_expired', message: `Account ${account.label} auth expired — reconnect needed` });
                 console.log(`[proxy] auth expired ${account.label}, trying next account...`);
                 continue; // try next account

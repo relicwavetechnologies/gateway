@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { v4 as uuid } from 'uuid';
 import { requireAdmin } from '../middleware/auth.js';
 import { createApiKey, listApiKeys, revokeApiKey } from '../db/keys.js';
+import { invalidateApiKey } from '../cache/hotpath.js';
 
 const router = Router();
 router.use(requireAdmin);
@@ -25,6 +26,7 @@ router.post('/', async (req, res) => {
         rateLimitRpm: rate_limit_rpm ?? null,
         createdBy: req.uid,
     });
+    invalidateApiKey(metadata.id);
     res.json({ key: raw, metadata });
 });
 
@@ -33,11 +35,13 @@ router.patch('/:id', async (req, res) => {
     if (!allowed_providers?.length) { res.status(400).json({ error: 'allowed_providers required' }); return; }
     const { default: sql } = await import('../db/index.js');
     await sql`UPDATE api_keys SET allowed_providers = ${allowed_providers.join(',')} WHERE id = ${req.params.id}`;
+    invalidateApiKey(req.params.id);
     res.json({ ok: true });
 });
 
 router.delete('/:id', async (req, res) => {
     await revokeApiKey(req.params.id, req.uid);
+    invalidateApiKey(req.params.id);
     res.json({ ok: true });
 });
 

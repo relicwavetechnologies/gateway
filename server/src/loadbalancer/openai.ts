@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { Response } from 'express';
 import { ActiveAccount } from '../db/accounts.js';
+import { logLatency } from '../utils/timing.js';
 
 const ENDPOINT = 'https://chatgpt.com/backend-api/codex/responses';
 
@@ -69,6 +70,7 @@ export async function forwardToOpenAI(
         prompt_cache_key: crypto.randomUUID(),
     };
 
+    const upstreamStart = Date.now();
     const response = await axios.post(ENDPOINT, payload, {
         headers: {
             Authorization: `Bearer ${account.access_token}`,
@@ -77,6 +79,7 @@ export async function forwardToOpenAI(
         responseType: 'stream',
         timeout: 60_000,
     });
+    logLatency('openai', 'headers', upstreamStart, `account=${account.id}`);
 
     if (isStream) {
         res.setHeader('Content-Type', 'text/event-stream');
@@ -84,7 +87,12 @@ export async function forwardToOpenAI(
         let replyText = '';
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let sawFirstByte = false;
         response.data.on('data', (chunk: Buffer) => {
+            if (!sawFirstByte) {
+                sawFirstByte = true;
+                logLatency('openai', 'first_byte', upstreamStart, `account=${account.id}`);
+            }
             const lines = chunk.toString().split('\n');
             for (const line of lines) {
                 if (!line.startsWith('data: ')) continue;
@@ -108,13 +116,22 @@ export async function forwardToOpenAI(
         });
 
         return new Promise((resolve, reject) => {
-            response.data.on('end', () => { res.end(); resolve({ replyText }); });
+            response.data.on('end', () => {
+                logLatency('openai', 'complete', upstreamStart, `account=${account.id}`);
+                res.end();
+                resolve({ replyText });
+            });
             response.data.on('error', reject);
         });
     } else {
         let replyText = '';
+        let sawFirstByte = false;
         await new Promise<void>((resolve, reject) => {
             response.data.on('data', (chunk: Buffer) => {
+                if (!sawFirstByte) {
+                    sawFirstByte = true;
+                    logLatency('openai', 'first_byte', upstreamStart, `account=${account.id}`);
+                }
                 for (const line of chunk.toString().split('\n')) {
                     if (!line.startsWith('data: ')) continue;
                     const data = line.slice(6);
@@ -125,7 +142,10 @@ export async function forwardToOpenAI(
                     } catch { /* skip */ }
                 }
             });
-            response.data.on('end', resolve);
+            response.data.on('end', () => {
+                logLatency('openai', 'complete', upstreamStart, `account=${account.id}`);
+                resolve();
+            });
             response.data.on('error', reject);
         });
 

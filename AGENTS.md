@@ -22,7 +22,9 @@ Gateway
 ├── Architecture & Tech Stack
 ├── URLs & Access
 ├── Reviews & MoMs
-└── Updates
+├── Updates
+└── References
+    └── OpenAI Codex Workaround
 ```
 
 **Wiki space ID:** `7635896570625396443`
@@ -38,6 +40,8 @@ Gateway
 | URLs & Access | `PQFQwfTJ9ilkpLklCCOl1gpMgbg` | `EV3bddPkyoQiCXxA1bOlbDZqgVb` |
 | Reviews & MoMs | `SdsNwDNTZi8LwBkAvQ5lL8rjgG6` | `KAfGd7YhUopAHYxQ457lNcAUgnQ` |
 | Updates | `WOe6wtYmei9W9QkZVBTlUDXKgBe` | `M0XAdFjtsoiMhpxqwJ5lSf00gdb` |
+| References | `LggywvoiPiTuxikp72hlyTVYgEf` | `RWOydf9xTo8NFqxTxaKlym58gMh` |
+| OpenAI Codex Workaround | `TApqwQYcqimIA8kKYiRlYeDOgYy` | `TREfdrwGnoxjc7xntVClVdNig6b` |
 
 ### How to read/write wiki pages
 
