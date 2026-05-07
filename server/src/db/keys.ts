@@ -22,6 +22,12 @@ export type ResolvedKey = ApiKeyPublic;
 
 const now = () => Date.now();
 
+export function hashApiKey(rawKey: string): string | null {
+    if (!rawKey.startsWith('cnsc_gw_')) return null;
+    const secret = rawKey.replace('cnsc_gw_', '');
+    return crypto.createHash('sha256').update(secret).digest('hex');
+}
+
 function generateKey(): { raw: string; hashed: string; prefix: string } {
     const secret = crypto.randomBytes(24).toString('hex');
     const raw = `cnsc_gw_${secret}`;
@@ -53,14 +59,22 @@ export async function listApiKeys(createdBy: string): Promise<ApiKeyPublic[]> {
 }
 
 export async function resolveKey(rawKey: string): Promise<ResolvedKey | null> {
-    if (!rawKey.startsWith('cnsc_gw_')) return null;
-    const secret = rawKey.replace('cnsc_gw_', '');
-    const hashed = crypto.createHash('sha256').update(secret).digest('hex');
+    const hashed = hashApiKey(rawKey);
+    if (!hashed) return null;
+    const row = await resolveKeyByHash(hashed);
+    if (!row) return null;
+    touchApiKey(row.id);
+    return row;
+}
+
+export async function resolveKeyByHash(hashed: string): Promise<ResolvedKey | null> {
     const [row] = await sql<ApiKey[]>`SELECT * FROM api_keys WHERE hashed_key = ${hashed} AND revoked = 0`;
     if (!row) return null;
-    // fire-and-forget update
-    sql`UPDATE api_keys SET last_used_at = ${now()} WHERE id = ${row.id}`.catch(() => null);
     return sanitize(row);
+}
+
+export function touchApiKey(id: string): void {
+    sql`UPDATE api_keys SET last_used_at = ${now()} WHERE id = ${id}`.catch(() => null);
 }
 
 export async function revokeApiKey(id: string, createdBy: string): Promise<void> {

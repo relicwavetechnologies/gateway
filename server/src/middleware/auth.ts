@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { resolveKey, ResolvedKey } from '../db/keys.js';
+import { ResolvedKey } from '../db/keys.js';
+import { getCachedApiKey } from '../cache/hotpath.js';
 
 declare global {
     namespace Express {
@@ -31,7 +32,7 @@ export async function requireApiKey(req: Request, res: Response, next: NextFunct
     const key = (req.headers['x-api-key'] as string | undefined) ?? req.headers.authorization?.replace('Bearer ', '');
     if (!key) { res.status(401).json({ error: 'Missing X-API-Key header' }); return; }
 
-    const keyData = await resolveKey(key);
+    const keyData = await getCachedApiKey(key);
     if (!keyData) { res.status(401).json({ error: 'Invalid or revoked API key' }); return; }
 
     req.apiKey = keyData;

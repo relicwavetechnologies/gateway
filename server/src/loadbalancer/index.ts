@@ -1,11 +1,11 @@
 import {
-    listActiveAccounts,
     updateAccountStatus,
     recordAccountSuccess,
     recordAccountError,
     markAccountRateLimited,
     ActiveAccount,
 } from '../db/accounts.js';
+import { getCachedActiveAccounts, invalidateAccountPool } from '../cache/hotpath.js';
 
 // ─── In-memory state ──────────────────────────────────────────────────────────
 
@@ -104,7 +104,7 @@ function accountPriority(account: ActiveAccount): number {
 // Marks the top account as assigned RIGHT NOW to prevent two concurrent
 // requests from both selecting the same account.
 export async function getAllAccounts(provider: string): Promise<ActiveAccount[]> {
-    const all = await listActiveAccounts(provider);
+    const all = await getCachedActiveAccounts(provider);
     const sorted = all
         .filter(a => !isOnCooldown(a.id))
         .sort((a, b) => accountPriority(a) - accountPriority(b));
@@ -115,7 +115,7 @@ export async function getAllAccounts(provider: string): Promise<ActiveAccount[]>
 // Same as getAllAccounts but appends cooling-down accounts at the end as a
 // last-resort fallback — better to try a throttled account than fail outright.
 export async function getAllAccountsIncludingCooldown(provider: string): Promise<ActiveAccount[]> {
-    const all = await listActiveAccounts(provider);
+    const all = await getCachedActiveAccounts(provider);
     const fresh  = all.filter(a => !isOnCooldown(a.id)).sort((a, b) => accountPriority(a) - accountPriority(b));
     const cooled = all.filter(a =>  isOnCooldown(a.id)).sort((a, b) => accountPriority(a) - accountPriority(b));
 
@@ -149,6 +149,7 @@ export async function handleRateLimit(account: ActiveAccount, error: string): Pr
         lastAssigned.delete(accountId);
         inMemoryCooldown.delete(accountId);
         await markAccountRateLimited(accountId, cooldownUntil, error);
+        invalidateAccountPool(account.provider);
 
         console.log(
             `[lb] openai rate limit: ${accountId} (${account.account_tier}) — cooldown until ${new Date(cooldownUntil).toISOString()}`,
@@ -167,12 +168,13 @@ export async function handleRateLimit(account: ActiveAccount, error: string): Pr
     return Date.now() + seconds * 1_000;
 }
 
-export async function handleAuthError(accountId: string): Promise<void> {
+export async function handleAuthError(accountId: string, provider?: string): Promise<void> {
     // Auth failures are permanent — write to DB so the admin panel shows them.
     consecutiveFailures.delete(accountId);
     lastAssigned.delete(accountId);
     await updateAccountStatus(accountId, 'auth_expired', 0);
     await recordAccountError(accountId, 'auth_expired');
+    invalidateAccountPool(provider);
 }
 
 export async function handleServerError(accountId: string, error: string): Promise<void> {

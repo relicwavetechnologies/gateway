@@ -5,12 +5,14 @@ import { createSession, exchangeCode } from '../oauth/openai.js';
 import { createSession as createGeminiSession, exchangeCode as exchangeGeminiCode } from '../oauth/gemini.js';
 import { createSession as createClaudeSession, exchangeCode as exchangeClaudeCode } from '../oauth/claude.js';
 import { createAccount, listAccounts, getAccount, patchAccount, deleteAccount, resetExpiredCooldowns, Account } from '../db/accounts.js';
+import { invalidateAccountPool } from '../cache/hotpath.js';
 
 const router = Router();
 router.use(requireAdmin);
 
 router.get('/', async (_req, res) => {
     await resetExpiredCooldowns();
+    invalidateAccountPool();
     res.json(await listAccounts());
 });
 
@@ -54,6 +56,7 @@ router.post('/complete', async (req, res) => {
     if (provider === 'openai') {
         const { accessToken, refreshToken, expiresAt } = await exchangeCode(session_id, code);
         const account = await createAccount({ id: uuid(), provider: 'openai', label: label ?? 'OpenAI account', accessToken, refreshToken, expiresAt, createdBy: req.uid, accountTier: req.body.account_tier ?? 'free' });
+        invalidateAccountPool('openai');
         res.json(account);
         return;
     }
@@ -61,6 +64,7 @@ router.post('/complete', async (req, res) => {
     if (provider === 'gemini') {
         const { accessToken, refreshToken, expiresAt } = await exchangeGeminiCode(session_id, code);
         const account = await createAccount({ id: uuid(), provider: 'gemini', label: label ?? 'Gemini account', accessToken, refreshToken, expiresAt, createdBy: req.uid });
+        invalidateAccountPool('gemini');
         res.json(account);
         return;
     }
@@ -68,6 +72,7 @@ router.post('/complete', async (req, res) => {
     if (provider === 'claude') {
         const { accessToken, refreshToken, expiresAt } = await exchangeClaudeCode(session_id, code);
         const account = await createAccount({ id: uuid(), provider: 'claude', label: label ?? 'Claude account', accessToken, refreshToken, expiresAt, createdBy: req.uid });
+        invalidateAccountPool('claude');
         res.json(account);
         return;
     }
@@ -104,6 +109,7 @@ router.post('/import-token', async (req, res) => {
         createdBy: req.uid,
         accountTier: req.body.account_tier ?? 'free',
     });
+    invalidateAccountPool(provider);
     res.json(account);
 });
 
@@ -170,11 +176,15 @@ router.patch('/:id', async (req, res) => {
         return;
     }
     await patchAccount(req.params.id, { label, status, account_tier });
-    res.json(await getAccount(req.params.id));
+    const account = await getAccount(req.params.id);
+    invalidateAccountPool(account?.provider);
+    res.json(account);
 });
 
 router.delete('/:id', async (req, res) => {
+    const account = await getAccount(req.params.id);
     await deleteAccount(req.params.id);
+    invalidateAccountPool(account?.provider);
     res.json({ ok: true });
 });
 

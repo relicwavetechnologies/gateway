@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { Response } from 'express';
 import { ActiveAccount } from '../db/accounts.js';
+import { logLatency } from '../utils/timing.js';
 
 const API_BASE = 'https://api.anthropic.com';
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -68,18 +69,25 @@ export async function forwardToClaude(
     };
 
     if (isStream) {
+        const upstreamStart = Date.now();
         const response = await axios.post(
             `${API_BASE}/v1/messages`,
             body,
             { headers, responseType: 'stream', timeout: 120_000 },
         );
+        logLatency('claude', 'headers', upstreamStart, `account=${account.id}`);
 
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         let replyText = '';
 
         return new Promise((resolve, reject) => {
+            let sawFirstByte = false;
             response.data.on('data', (chunk: Buffer) => {
+                if (!sawFirstByte) {
+                    sawFirstByte = true;
+                    logLatency('claude', 'first_byte', upstreamStart, `account=${account.id}`);
+                }
                 for (const line of chunk.toString().split('\n')) {
                     if (!line.startsWith('data: ')) continue;
                     const data = line.slice(6).trim();
@@ -97,10 +105,15 @@ export async function forwardToClaude(
                     } catch { /* skip malformed */ }
                 }
             });
-            response.data.on('end', () => { res.end(); resolve({ replyText }); });
+            response.data.on('end', () => {
+                logLatency('claude', 'complete', upstreamStart, `account=${account.id}`);
+                res.end();
+                resolve({ replyText });
+            });
             response.data.on('error', reject);
         });
     } else {
+        const upstreamStart = Date.now();
         const response = await axios.post<{
             id: string;
             type: string;
@@ -110,6 +123,7 @@ export async function forwardToClaude(
             stop_reason: string;
             usage?: { input_tokens?: number; output_tokens?: number };
         }>(`${API_BASE}/v1/messages`, body, { headers, timeout: 120_000 });
+        logLatency('claude', 'complete', upstreamStart, `account=${account.id}`);
 
         const replyText = response.data.content?.[0]?.text ?? '';
         const usage = response.data.usage;
