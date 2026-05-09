@@ -25,6 +25,10 @@ function fmtTokens(n: number) {
   return String(n)
 }
 
+function fmtLatency(n: number | null | undefined) {
+  return n == null ? 'N/A' : `${Math.round(n).toLocaleString()} ms`
+}
+
 const PROVIDER_COLOR: Record<string, string> = {
   openai: 'bg-emerald-400',
   claude: 'bg-violet-400',
@@ -49,6 +53,8 @@ export default function Usage() {
   const stats = [
     { label: 'Total Requests', value: usage?.total_requests ?? '—', sub: 'all providers' },
     { label: 'Errors', value: usage?.total_errors ?? '—', sub: `${usage?.error_rate ?? 0}% error rate` },
+    { label: 'P50 Latency', value: usage ? fmtLatency(usage.p50_latency_ms) : '—', sub: 'successful requests' },
+    { label: 'P95 Latency', value: usage ? fmtLatency(usage.p95_latency_ms) : '—', sub: 'successful requests' },
     { label: 'Prompt Tokens', value: usage ? fmtTokens(usage.total_prompt_tokens ?? 0) : '—', sub: 'input tokens used' },
     { label: 'Completion Tokens', value: usage ? fmtTokens(usage.total_completion_tokens ?? 0) : '—', sub: 'output tokens generated' },
   ]
@@ -80,7 +86,7 @@ export default function Usage() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
         {stats.map(s => (
           <div key={s.label} className="card">
             <p className="text-xs text-zinc-500 uppercase tracking-wide">{s.label}</p>
@@ -212,6 +218,11 @@ export default function Usage() {
                   <div className="w-full bg-zinc-800 rounded-full h-1.5">
                     <div className={cn('h-1.5 rounded-full', barColor)} style={{ width: `${pct}%` }} />
                   </div>
+                  <p className="text-xs text-zinc-500 text-right">
+                    {row.provider === 'openai' || row.prompt_tokens + row.completion_tokens <= 0
+                      ? 'no token data'
+                      : `${fmtTokens(row.prompt_tokens)} in · ${fmtTokens(row.completion_tokens)} out`}
+                  </p>
                 </div>
               )
             })}

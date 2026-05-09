@@ -28,6 +28,14 @@ export async function initSchema(): Promise<void> {
             error_count       INTEGER NOT NULL DEFAULT 0,
             last_error        TEXT,
             last_used_at      BIGINT,
+            codex_plan_type   TEXT,
+            codex_primary_pct REAL,
+            codex_primary_reset BIGINT,
+            codex_secondary_pct REAL,
+            codex_secondary_reset BIGINT,
+            codex_credits     REAL,
+            codex_updated_at  BIGINT,
+            recovered_at      BIGINT,
             created_at        BIGINT NOT NULL,
             created_by        TEXT NOT NULL
         )
@@ -88,6 +96,14 @@ export async function initSchema(): Promise<void> {
         ALTER TABLE accounts
         ADD COLUMN IF NOT EXISTS account_tier TEXT NOT NULL DEFAULT 'free'
     `;
+    await sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS codex_plan_type TEXT`;
+    await sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS codex_primary_pct REAL`;
+    await sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS codex_primary_reset BIGINT`;
+    await sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS codex_secondary_pct REAL`;
+    await sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS codex_secondary_reset BIGINT`;
+    await sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS codex_credits REAL`;
+    await sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS codex_updated_at BIGINT`;
+    await sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS recovered_at BIGINT`;
 
     await sql`
         ALTER TABLE accounts

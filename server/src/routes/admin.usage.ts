@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireAdmin } from '../middleware/auth.js';
 import { getUsageSummary, listAlerts, resolveAlert } from '../db/usage.js';
 import { sendEmail } from '../utils/email.js';
+import { getProxyStats } from './proxy.js';
 
 const router = Router();
 router.use(requireAdmin);
@@ -9,6 +10,10 @@ router.use(requireAdmin);
 router.get('/', async (req, res) => {
     const days = req.query.days ? Number(req.query.days) : 7;
     res.json(await getUsageSummary({ days }));
+});
+
+router.get('/stats', (_req, res) => {
+    res.json(getProxyStats());
 });
 
 router.get('/alerts', async (req, res) => {

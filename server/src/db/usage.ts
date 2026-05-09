@@ -47,8 +47,10 @@ export async function getUsageSummary({ days = 7 }: { days?: number } = {}): Pro
     gemini_requests: number;
     total_prompt_tokens: number;
     total_completion_tokens: number;
+    p50_latency_ms: number | null;
+    p95_latency_ms: number | null;
     timeline: { label: string; openai: number; claude: number; gemini: number; errors: number }[];
-    by_account: { account_id: string; label: string | null; provider: string; count: number; errors: number }[];
+    by_account: { account_id: string; label: string | null; provider: string; count: number; errors: number; prompt_tokens: number; completion_tokens: number }[];
     by_key: { key_id: string; key_name: string | null; key_prefix: string | null; count: number; errors: number; prompt_tokens: number; completion_tokens: number }[];
     by_model: { model: string; provider: string; count: number; prompt_tokens: number; completion_tokens: number }[];
 }> {
@@ -61,6 +63,13 @@ export async function getUsageSummary({ days = 7 }: { days?: number } = {}): Pro
                COALESCE(SUM(completion_tokens), 0) as ct
         FROM usage_logs WHERE created_at BETWEEN ${from} AND ${to}`;
     const [errRow] = await sql<[{ n: string }]>`SELECT COUNT(*) as n FROM usage_logs WHERE status_code >= 400 AND created_at BETWEEN ${from} AND ${to}`;
+    const [latencyRow] = await sql<[{ p50_latency_ms: number | null; p95_latency_ms: number | null }]>`
+        SELECT
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY latency_ms) as p50_latency_ms,
+            PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) as p95_latency_ms
+        FROM usage_logs
+        WHERE status_code < 400 AND created_at BETWEEN ${from} AND ${to}
+    `;
 
     const byProvider = await sql<{ provider: string; n: string }[]>`
         SELECT provider, COUNT(*) as n
@@ -68,14 +77,16 @@ export async function getUsageSummary({ days = 7 }: { days?: number } = {}): Pro
         GROUP BY provider
     `;
 
-    const byAccount = await sql<{ account_id: string; label: string | null; provider: string; count: string; errors: string }[]>`
-        SELECT u.account_id, a.label, a.provider,
+    const byAccount = await sql<{ account_id: string; label: string | null; provider: string; count: string; errors: string; prompt_tokens: string; completion_tokens: string }[]>`
+        SELECT u.account_id, a.label, COALESCE(a.provider, u.provider) as provider,
                COUNT(*) as count,
-               SUM(CASE WHEN u.status_code >= 400 THEN 1 ELSE 0 END) as errors
+               SUM(CASE WHEN u.status_code >= 400 THEN 1 ELSE 0 END) as errors,
+               COALESCE(SUM(u.prompt_tokens), 0) as prompt_tokens,
+               COALESCE(SUM(u.completion_tokens), 0) as completion_tokens
         FROM usage_logs u
         LEFT JOIN accounts a ON a.id = u.account_id
         WHERE u.created_at BETWEEN ${from} AND ${to}
-        GROUP BY u.account_id, a.label, a.provider
+        GROUP BY u.account_id, a.label, a.provider, u.provider
         ORDER BY count DESC
         LIMIT 20
     `;
@@ -141,8 +152,10 @@ export async function getUsageSummary({ days = 7 }: { days?: number } = {}): Pro
         gemini_requests: providerMap['gemini'] ?? 0,
         total_prompt_tokens: Number(totalRow.pt),
         total_completion_tokens: Number(totalRow.ct),
+        p50_latency_ms: latencyRow?.p50_latency_ms == null ? null : Math.round(Number(latencyRow.p50_latency_ms)),
+        p95_latency_ms: latencyRow?.p95_latency_ms == null ? null : Math.round(Number(latencyRow.p95_latency_ms)),
         timeline,
-        by_account: byAccount.map(r => ({ ...r, count: Number(r.count), errors: Number(r.errors) })),
+        by_account: byAccount.map(r => ({ ...r, count: Number(r.count), errors: Number(r.errors), prompt_tokens: Number(r.prompt_tokens), completion_tokens: Number(r.completion_tokens) })),
         by_key: byKey.map(r => ({ ...r, count: Number(r.count), errors: Number(r.errors), prompt_tokens: Number(r.prompt_tokens), completion_tokens: Number(r.completion_tokens) })),
         by_model: byModel.map(r => ({ ...r, count: Number(r.count), prompt_tokens: Number(r.prompt_tokens), completion_tokens: Number(r.completion_tokens) })),
     };

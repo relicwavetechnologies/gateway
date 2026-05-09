@@ -24,7 +24,10 @@ Gateway
 ├── Reviews & MoMs
 ├── Updates
 └── References
-    └── OpenAI Codex Workaround
+    ├── OpenAI Codex Workaround
+    ├── Codex Response Headers
+    ├── OpenClaw Architecture Patterns
+    └── Dashboard Redesign Plan
 ```
 
 **Wiki space ID:** `7635896570625396443`
@@ -42,6 +45,9 @@ Gateway
 | Updates | `WOe6wtYmei9W9QkZVBTlUDXKgBe` | `M0XAdFjtsoiMhpxqwJ5lSf00gdb` |
 | References | `LggywvoiPiTuxikp72hlyTVYgEf` | `RWOydf9xTo8NFqxTxaKlym58gMh` |
 | OpenAI Codex Workaround | `TApqwQYcqimIA8kKYiRlYeDOgYy` | `TREfdrwGnoxjc7xntVClVdNig6b` |
+| Codex Response Headers | `Ixw8wFb74ibIamkBZNoltZaMgL6` | `H3uudmEXBoaevLx6j4IloBuOgBf` |
+| OpenClaw Architecture Patterns | `DuYOwkzCOicsvkkDVb6lyxXCggg` | `Aj9ydVNMjoQjU1xICrrlaFtWgnf` |
+| Dashboard Redesign Plan | `ExE3wGqdvi4NGqkqXm4lPVhbgRd` | `Jf5qdtgLeoOY1lxs0J9lknXLgTc` |
 
 ### How to read/write wiki pages
 
