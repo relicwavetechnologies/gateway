@@ -114,8 +114,8 @@ export async function getUsageSummary({ days = 7 }: { days?: number } = {}): Pro
         const bucketFrom = from + i * bucketMs;
         const bucketTo = bucketFrom + bucketMs;
         const label = days <= 1
-            ? new Date(bucketFrom).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : new Date(bucketFrom).toLocaleDateString([], { month: 'short', day: 'numeric' });
+            ? new Date(bucketFrom).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
+            : new Date(bucketFrom).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', timeZone: 'Asia/Kolkata' });
 
         const [row] = await sql<[{ openai: string | null; claude: string | null; gemini: string | null; errors: string | null }]>`
             SELECT
