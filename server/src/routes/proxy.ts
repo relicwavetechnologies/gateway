@@ -16,7 +16,7 @@ import { forwardToClaude } from '../loadbalancer/claude.js';
 import { forwardToGemini, isProModel, MIN_PRO_ACCOUNTS, LITE_MODELS } from '../loadbalancer/gemini.js';
 import { logUsage, createAlert, getUnEmailedAlerts, markAlertEmailed } from '../db/usage.js';
 import { sendAlert } from '../utils/email.js';
-import type { ActiveAccount } from '../db/accounts.js';
+import { updateAccountCodexHeaders, type ActiveAccount, type CodexHeaders } from '../db/accounts.js';
 import { logLatency } from '../utils/timing.js';
 
 const router = Router();
@@ -28,7 +28,14 @@ function detectProvider(model: string): 'openai' | 'claude' | 'gemini' {
     return 'openai';
 }
 
-type ForwardResult = { replyText: string; promptTokens?: number; completionTokens?: number };
+type ForwardResult = { replyText: string; promptTokens?: number; completionTokens?: number; codexHeaders?: CodexHeaders };
+
+let rescuedCount = 0;
+let totalProxied = 0;
+
+export function getProxyStats(): { rescued: number; total: number } {
+    return { rescued: rescuedCount, total: totalProxied };
+}
 
 function providerErrorMessage(err: { response?: { data?: unknown }; message?: string; code?: string }): string {
     const data = err.response?.data;
@@ -138,9 +145,15 @@ async function proxyRequest(
             completionTokens = result.completionTokens;
 
             await handleSuccess(account.id);
+            if (provider === 'openai' && result.codexHeaders) {
+                updateAccountCodexHeaders(account.id, result.codexHeaders)
+                    .catch(err => console.error(`[proxy] failed to persist codex headers for ${account.id}:`, err));
+            }
             succeeded = true;
             finalStatusCode = 200;
             finalError = null;
+            totalProxied += 1;
+            if (triedIds.size > 1) rescuedCount += 1;
             break;
         } catch (err: unknown) {
             const axiosErr = err as { response?: { status?: number; data?: unknown }; message?: string; code?: string };

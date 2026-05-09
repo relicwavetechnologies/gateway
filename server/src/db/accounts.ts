@@ -15,6 +15,14 @@ export interface Account {
     error_count: number;
     last_error: string | null;
     last_used_at: number | null;
+    codex_plan_type: string | null;
+    codex_primary_pct: number | null;
+    codex_primary_reset: number | null;
+    codex_secondary_pct: number | null;
+    codex_secondary_reset: number | null;
+    codex_credits: number | null;
+    codex_updated_at: number | null;
+    recovered_at: number | null;
     created_at: number;
     created_by: string;
 }
@@ -26,6 +34,19 @@ export interface ActiveAccount extends Omit<Account, 'access_token_enc' | 'refre
 export type PublicAccount = Omit<Account, 'access_token_enc' | 'refresh_token_enc'>;
 
 const now = () => Date.now();
+
+export interface CodexHeaders {
+    planType?: string;
+    primaryPct?: number;
+    primaryResetSeconds?: number;
+    secondaryPct?: number;
+    secondaryResetSeconds?: number;
+    credits?: number;
+}
+
+function finiteNumber(value: number | undefined): number | undefined {
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
 
 export async function getExpiringGeminiAccounts(threshold: number): Promise<Pick<Account, 'id' | 'label'>[]> {
     return sql<Pick<Account, 'id' | 'label'>[]>`
@@ -124,14 +145,37 @@ export async function markAccountRateLimited(id: string, cooldownUntil: number, 
 }
 
 export async function recordAccountSuccess(id: string): Promise<void> {
+    const ts = now();
     await sql`
         UPDATE accounts
         SET request_count = request_count + 1,
-            last_used_at = ${now()},
+            last_used_at = ${ts},
+            recovered_at = CASE WHEN status = 'rate_limited' THEN ${ts} ELSE recovered_at END,
             status = CASE WHEN status = 'rate_limited' THEN 'active' ELSE status END,
             cooldown_until = CASE WHEN status = 'rate_limited' THEN NULL ELSE cooldown_until END
         WHERE id = ${id}
     `;
+}
+
+export async function updateAccountCodexHeaders(id: string, h: CodexHeaders): Promise<void> {
+    const ts = now();
+    const updates: Record<string, unknown> = { codex_updated_at: ts };
+    const planType = h.planType?.trim().toLowerCase();
+    const primaryPct = finiteNumber(h.primaryPct);
+    const primaryResetSeconds = finiteNumber(h.primaryResetSeconds);
+    const secondaryPct = finiteNumber(h.secondaryPct);
+    const secondaryResetSeconds = finiteNumber(h.secondaryResetSeconds);
+    const credits = finiteNumber(h.credits);
+
+    if (planType) updates['codex_plan_type'] = planType;
+    if (primaryPct !== undefined) updates['codex_primary_pct'] = primaryPct;
+    if (primaryResetSeconds !== undefined) updates['codex_primary_reset'] = ts + Math.max(0, primaryResetSeconds) * 1_000;
+    if (secondaryPct !== undefined) updates['codex_secondary_pct'] = secondaryPct;
+    if (secondaryResetSeconds !== undefined) updates['codex_secondary_reset'] = ts + Math.max(0, secondaryResetSeconds) * 1_000;
+    if (credits !== undefined) updates['codex_credits'] = credits;
+    if (planType === 'plus' || planType === 'premium') updates['account_tier'] = 'pro';
+
+    await sql`UPDATE accounts SET ${sql(updates)} WHERE id = ${id}`;
 }
 
 export async function recordAccountError(id: string, error: string): Promise<void> {
@@ -194,9 +238,13 @@ export async function getExpiringOpenAIAccounts(threshold: number): Promise<Pick
 }
 
 export async function resetExpiredCooldowns(): Promise<void> {
+    const ts = now();
     await sql`
-        UPDATE accounts SET status = 'active', cooldown_until = NULL
-        WHERE status = 'rate_limited' AND cooldown_until < ${now()}
+        UPDATE accounts
+        SET status = 'active',
+            cooldown_until = NULL,
+            recovered_at = ${ts}
+        WHERE status = 'rate_limited' AND cooldown_until < ${ts}
     `;
 }
 

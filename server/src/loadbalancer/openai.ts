@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { Response } from 'express';
-import { ActiveAccount } from '../db/accounts.js';
+import { ActiveAccount, CodexHeaders } from '../db/accounts.js';
 import { logLatency } from '../utils/timing.js';
 
 const ENDPOINT = 'https://chatgpt.com/backend-api/codex/responses';
@@ -44,11 +44,50 @@ interface OpenAIRequest {
     stream?: boolean;
 }
 
+type OpenAIForwardResult = { replyText: string; codexHeaders?: CodexHeaders };
+
+function headerValue(headers: unknown, name: string): string | undefined {
+    if (!headers || typeof headers !== 'object') return undefined;
+    const maybeGetter = headers as { get?: (key: string) => unknown };
+    const value = typeof maybeGetter.get === 'function'
+        ? maybeGetter.get(name)
+        : (headers as Record<string, unknown>)[name] ?? (headers as Record<string, unknown>)[name.toLowerCase()];
+    if (Array.isArray(value)) return value[0] === undefined ? undefined : String(value[0]);
+    if (value === undefined || value === null) return undefined;
+    return String(value);
+}
+
+function parseHeaderNumber(headers: unknown, name: string): number | undefined {
+    const value = headerValue(headers, name);
+    if (value === undefined) return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseCodexHeaders(headers: unknown): CodexHeaders | undefined {
+    const codexHeaders: CodexHeaders = {};
+    const planType = headerValue(headers, 'x-codex-plan-type')?.trim().toLowerCase();
+    const primaryPct = parseHeaderNumber(headers, 'x-codex-primary-used-percent');
+    const primaryResetSeconds = parseHeaderNumber(headers, 'x-codex-primary-reset-after-seconds');
+    const secondaryPct = parseHeaderNumber(headers, 'x-codex-secondary-used-percent');
+    const secondaryResetSeconds = parseHeaderNumber(headers, 'x-codex-secondary-reset-after-seconds');
+    const credits = parseHeaderNumber(headers, 'x-codex-credits-balance');
+
+    if (planType) codexHeaders.planType = planType;
+    if (primaryPct !== undefined) codexHeaders.primaryPct = primaryPct;
+    if (primaryResetSeconds !== undefined) codexHeaders.primaryResetSeconds = primaryResetSeconds;
+    if (secondaryPct !== undefined) codexHeaders.secondaryPct = secondaryPct;
+    if (secondaryResetSeconds !== undefined) codexHeaders.secondaryResetSeconds = secondaryResetSeconds;
+    if (credits !== undefined) codexHeaders.credits = credits;
+
+    return Object.keys(codexHeaders).length ? codexHeaders : undefined;
+}
+
 export async function forwardToOpenAI(
     account: ActiveAccount,
     openaiRequest: OpenAIRequest,
     res: Response,
-): Promise<{ replyText: string }> {
+): Promise<OpenAIForwardResult> {
     const model = normalizeModel(openaiRequest.model);
     if (model !== openaiRequest.model) {
         console.log(`[openai] model alias: ${openaiRequest.model} → ${model}`);
@@ -80,6 +119,7 @@ export async function forwardToOpenAI(
         timeout: 60_000,
     });
     logLatency('openai', 'headers', upstreamStart, `account=${account.id}`);
+    const codexHeaders = parseCodexHeaders(response.headers);
 
     if (isStream) {
         res.setHeader('Content-Type', 'text/event-stream');
@@ -119,7 +159,7 @@ export async function forwardToOpenAI(
             response.data.on('end', () => {
                 logLatency('openai', 'complete', upstreamStart, `account=${account.id}`);
                 res.end();
-                resolve({ replyText });
+                resolve({ replyText, codexHeaders });
             });
             response.data.on('error', reject);
         });
@@ -156,6 +196,6 @@ export async function forwardToOpenAI(
             choices: [{ index: 0, message: { role: 'assistant', content: replyText }, finish_reason: 'stop' }],
             usage: { prompt_tokens: null, completion_tokens: null, total_tokens: null },
         });
-        return { replyText };
+        return { replyText, codexHeaders };
     }
 }

@@ -117,53 +117,44 @@ router.post('/:id/test', async (req, res) => {
     const account = await getAccount(req.params.id);
     if (!account) { res.status(404).json({ error: 'Account not found' }); return; }
 
+    const { model: reqModel, message: reqMessage } = req.body as { model?: string; message?: string };
+    const prompt = reqMessage || 'say "ok" only';
+
+    const DEFAULT_MODELS: Record<string, string> = {
+        openai: 'gpt-5.4',
+        gemini: 'gemini-2.5-flash',
+        claude: 'claude-sonnet-4-6',
+    };
+
     try {
         const { listActiveAccounts } = await import('../db/accounts.js');
+        const actives = await listActiveAccounts(account.provider);
+        const active = actives.find(a => a.id === account.id);
+        if (!active) { res.status(400).json({ error: 'Account not active or no token' }); return; }
+
+        const testModel = reqModel || DEFAULT_MODELS[account.provider] || 'gpt-5.4';
+        let reply = '';
+        const start = Date.now();
+
+        const fakeRes = {
+            setHeader: () => {}, write: () => {}, end: () => {},
+            json: (d: any) => {
+                reply = d.choices?.[0]?.message?.content ?? d.content?.[0]?.text ?? '';
+            },
+        } as unknown as import('express').Response;
 
         if (account.provider === 'openai') {
             const { forwardToOpenAI } = await import('../loadbalancer/openai.js');
-            const actives = await listActiveAccounts('openai');
-            const active = actives.find(a => a.id === account.id);
-            if (!active) { res.status(400).json({ error: 'Account not active or no token' }); return; }
-            let reply = '';
-            const fakeRes = {
-                setHeader: () => {}, write: () => {}, end: () => {},
-                json: (d: any) => { reply = d.choices?.[0]?.message?.content ?? ''; },
-            } as unknown as import('express').Response;
-            await forwardToOpenAI(active, { model: 'gpt-5.4', messages: [{ role: 'user', content: 'say "ok" only' }], stream: false }, fakeRes);
-            res.json({ ok: true, reply });
-            return;
-        }
-
-        if (account.provider === 'gemini') {
+            await forwardToOpenAI(active, { model: testModel, messages: [{ role: 'user', content: prompt }], stream: false }, fakeRes);
+        } else if (account.provider === 'gemini') {
             const { forwardToGemini } = await import('../loadbalancer/gemini.js');
-            const actives = await listActiveAccounts('gemini');
-            const active = actives.find(a => a.id === account.id);
-            if (!active) { res.status(400).json({ error: 'Account not active or no token' }); return; }
-            let reply = '';
-            const fakeRes = {
-                setHeader: () => {}, write: () => {}, end: () => {},
-                json: (d: any) => { reply = d.choices?.[0]?.message?.content ?? ''; },
-            } as unknown as import('express').Response;
-            await forwardToGemini(active, { model: 'gemini-2.5-flash', messages: [{ role: 'user', content: 'say "ok" only' }], stream: false }, fakeRes);
-            res.json({ ok: true, reply });
-            return;
+            await forwardToGemini(active, { model: testModel, messages: [{ role: 'user', content: prompt }], stream: false }, fakeRes);
+        } else if (account.provider === 'claude') {
+            const { forwardToClaude } = await import('../loadbalancer/claude.js');
+            await forwardToClaude(active, { model: testModel, messages: [{ role: 'user', content: prompt }], stream: false }, fakeRes);
         }
 
-        if (account.provider === 'claude') {
-            const { forwardToClaude } = await import('../loadbalancer/claude.js');
-            const actives = await listActiveAccounts('claude');
-            const active = actives.find(a => a.id === account.id);
-            if (!active) { res.status(400).json({ error: 'Account not active or no token' }); return; }
-            let reply = '';
-            const fakeRes = {
-                setHeader: () => {}, write: () => {}, end: () => {},
-                json: (d: any) => { reply = d.content?.[0]?.text ?? ''; },
-            } as unknown as import('express').Response;
-            await forwardToClaude(active, { model: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'say "ok" only' }], stream: false }, fakeRes);
-            res.json({ ok: true, reply });
-            return;
-        }
+        res.json({ ok: true, reply, model: testModel, latency_ms: Date.now() - start });
     } catch (err: unknown) {
         res.status(500).json({ ok: false, error: (err as Error).message });
     }

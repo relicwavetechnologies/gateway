@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getAccounts, initiateAccount, completeAccount, importToken, testAccount, patchAccount, deleteAccount } from '../lib/api'
-import { Plus, Trash2, TestTube2, Power, Copy, CheckCircle2, Terminal } from 'lucide-react'
+import { getAccounts, getUsage, initiateAccount, completeAccount, importToken, testAccount, patchAccount, deleteAccount } from '../lib/api'
+import { Plus, Trash2, TestTube2, Power, Copy, CheckCircle2, Terminal, Zap, RefreshCw } from 'lucide-react'
 import { absoluteTime, cn, relativeTime, statusColor, timeUntil } from '../lib/utils'
+import QuotaBar from '../components/QuotaBar'
+import type { AccountRow, Provider } from '../lib/types'
 
 type Step = 'idle' | 'initiated' | 'completing'
 type OS = 'mac' | 'windows'
+type AccountTokenUsage = { prompt_tokens: number; completion_tokens: number } | undefined
 
 const CLAUDE_SCRIPT = `#!/usr/bin/env python3
 import base64, hashlib, json, os, sys, threading, urllib.parse, urllib.request, webbrowser
@@ -103,9 +106,170 @@ function StepBadge({ n }: { n: number }) {
   )
 }
 
+function providerLabel(provider: Provider) {
+  if (provider === 'openai') return 'OpenAI'
+  if (provider === 'gemini') return 'Gemini'
+  return 'Claude'
+}
+
+function fmtTokens(n: number) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
+
+function detectedTier(account: AccountRow) {
+  return account.codex_plan_type ?? account.account_tier ?? 'free'
+}
+
+function isRecentlyRecovered(account: AccountRow) {
+  return Boolean(account.recovered_at && Date.now() - Number(account.recovered_at) < 3_600_000)
+}
+
+function tokenUsageLine(account: AccountRow, usage: AccountTokenUsage) {
+  if (account.provider === 'openai') return 'Token usage N/A'
+  if (!usage || usage.prompt_tokens + usage.completion_tokens <= 0) return 'no token data'
+  return `${fmtTokens(usage.prompt_tokens)} in · ${fmtTokens(usage.completion_tokens)} out`
+}
+
+function AccountDetails({
+  account,
+  tokenUsage,
+  patchTier,
+}: {
+  account: AccountRow
+  tokenUsage: AccountTokenUsage
+  patchTier: () => void
+}) {
+  const autoDetected = account.provider === 'openai' && Boolean(account.codex_plan_type)
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {account.provider === 'openai' && (
+          autoDetected ? (
+            <span className="badge uppercase text-[10px] border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+              {detectedTier(account)}
+            </span>
+          ) : (
+            <button
+              onClick={patchTier}
+              className={cn('badge uppercase text-[10px]', account.account_tier === 'pro' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 bg-zinc-800 text-zinc-400')}
+              title="Toggle OpenAI account tier until Codex headers auto-detect it"
+            >
+              {account.account_tier ?? 'free'}
+            </button>
+          )
+        )}
+        {autoDetected && <span className="text-xs text-zinc-500">auto-detected</span>}
+        {isRecentlyRecovered(account) && (
+          <span className="badge border-emerald-500/30 bg-emerald-500/10 text-emerald-300 animate-pulse">recently recovered</span>
+        )}
+      </div>
+
+      {account.provider === 'openai' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <QuotaBar label="5h window" pct={account.codex_primary_pct} resetAt={account.codex_primary_reset} />
+          <QuotaBar label="7d window" pct={account.codex_secondary_pct} resetAt={account.codex_secondary_reset} />
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+          <p className="text-zinc-500">Credits</p>
+          <p className="text-zinc-200 mt-0.5">{account.provider === 'openai' && account.codex_credits != null ? account.codex_credits.toLocaleString() : 'N/A'}</p>
+        </div>
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+          <p className="text-zinc-500">Tokens</p>
+          <p className="text-zinc-200 mt-0.5">{tokenUsageLine(account, tokenUsage)}</p>
+        </div>
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+          <p className="text-zinc-500">Freshness</p>
+          <p className="text-zinc-200 mt-0.5">{account.provider === 'openai' && account.codex_updated_at ? relativeTime(account.codex_updated_at) : 'N/A'}</p>
+        </div>
+      </div>
+
+      {account.recovered_at && (
+        <p className="text-xs text-emerald-400">Recovered {relativeTime(account.recovered_at)}</p>
+      )}
+    </div>
+  )
+}
+
+const MODELS_BY_PROVIDER: Record<Provider, string[]> = {
+  openai: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.5'],
+  gemini: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+  claude: ['claude-sonnet-4-6', 'claude-haiku-4-5'],
+}
+
+function PingSection({
+  account,
+  onResult,
+}: {
+  account: AccountRow
+  onResult: (result: any) => void
+}) {
+  const qc = useQueryClient()
+  const models = MODELS_BY_PROVIDER[account.provider as Provider] ?? []
+  const [model, setModel] = useState(models[0] ?? '')
+  const [pinging, setPinging] = useState(false)
+  const [result, setResult] = useState<any>(null)
+
+  async function ping() {
+    setPinging(true)
+    setResult(null)
+    try {
+      const data = await testAccount(account.id, { model })
+      setResult(data)
+      onResult(data)
+      qc.invalidateQueries({ queryKey: ['accounts'] })
+    } catch (err: any) {
+      const data = { ok: false, error: err?.response?.data?.error ?? err.message }
+      setResult(data)
+      onResult(data)
+    } finally {
+      setPinging(false)
+    }
+  }
+
+  return (
+    <div className="border-t border-zinc-800 pt-3 mt-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <select
+          value={model}
+          onChange={e => setModel(e.target.value)}
+          className="bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-200 focus:border-brand focus:outline-none"
+        >
+          {models.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <button
+          onClick={ping}
+          disabled={pinging}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+            pinging ? 'bg-zinc-800 text-zinc-500 cursor-wait' : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30'
+          )}
+        >
+          {pinging ? <RefreshCw size={12} className="animate-spin" /> : <Zap size={12} />}
+          {pinging ? 'Pinging...' : 'Ping'}
+        </button>
+        {result && (
+          <span className={cn('text-xs', result.ok ? 'text-emerald-400' : 'text-red-400')}>
+            {result.ok
+              ? `✓ ${result.reply?.slice(0, 50) || 'ok'} · ${result.latency_ms}ms`
+              : `✗ ${result.error?.slice(0, 80)}`
+            }
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function Accounts() {
   const qc = useQueryClient()
   const { data: accounts = [], isLoading } = useQuery({ queryKey: ['accounts'], queryFn: getAccounts })
+  const { data: usage } = useQuery({ queryKey: ['usage', 7], queryFn: () => getUsage(7), refetchInterval: 30_000 })
 
   const [showModal, setShowModal] = useState(false)
   const [provider, setProvider] = useState<'openai' | 'claude' | 'gemini'>('openai')
@@ -205,51 +369,60 @@ export default function Accounts() {
       ) : (
         <div className="space-y-3">
           {(['openai', 'gemini', 'claude'] as const).map(prov => {
-            const group = accounts.filter((a: any) => a.provider === prov)
+            const group = accounts.filter((a: AccountRow) => a.provider === prov)
             if (!group.length) return null
-            const provLabel = prov === 'openai' ? '🤖 OpenAI' : prov === 'gemini' ? '✨ Gemini' : '🧠 Claude'
+            const provLabel = providerLabel(prov)
             return (
               <div key={prov}>
                 <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">{provLabel}</p>
                 <div className="space-y-2">
-                  {group.map((a: any) => (
-                    <div key={a.id} className="card flex items-center gap-4">
-                      <div className={cn('w-2.5 h-2.5 rounded-full shrink-0', a.status === 'active' ? 'bg-emerald-400' : a.status === 'rate_limited' ? 'bg-amber-400' : 'bg-red-400')} />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-zinc-100">{a.label}</p>
-                        <p className="text-xs text-zinc-500">{Number(a.request_count).toLocaleString()} requests · {a.error_count} errors · last used {relativeTime(a.last_used_at)}</p>
-                        {a.status === 'rate_limited' && a.cooldown_until && (
-                          <p className="text-xs text-amber-400 mt-1">Available in {timeUntil(a.cooldown_until)} · {absoluteTime(a.cooldown_until)}</p>
-                        )}
-                        {a.status === 'rate_limited' && !a.cooldown_until && (
-                          <p className="text-xs text-red-400 mt-1">No automatic reset scheduled</p>
-                        )}
-                        {a.last_error && (
-                          <p className="text-xs text-zinc-500 mt-1 truncate">Last error: {a.last_error}</p>
-                        )}
-                        {testResults[a.id] && (
-                          <p className={cn('text-xs mt-1', testResults[a.id].ok ? 'text-emerald-400' : 'text-red-400')}>
-                            {testResults[a.id].ok ? `✓ ${testResults[a.id].reply}` : `✗ ${testResults[a.id].error}`}
-                          </p>
-                        )}
+                  {group.map((a: AccountRow) => {
+                    const tokenUsage = usage?.by_account.find(row => row.account_id === a.id)
+                    return (
+                      <div key={a.id} className="card">
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+                          <div className={cn('w-2.5 h-2.5 rounded-full shrink-0 mt-1.5', a.status === 'active' ? 'bg-emerald-400' : a.status === 'rate_limited' ? 'bg-amber-400' : 'bg-red-400')} />
+                          <div className="flex-1 min-w-0 space-y-3">
+                            <div>
+                              <p className="text-sm font-medium text-zinc-100">{a.label}</p>
+                              <p className="text-xs text-zinc-500">{Number(a.request_count).toLocaleString()} requests · {a.error_count} errors · last used {relativeTime(a.last_used_at)}</p>
+                              {a.status === 'rate_limited' && a.cooldown_until && (
+                                <p className="text-xs text-amber-400 mt-1">Available in {timeUntil(a.cooldown_until)} · {absoluteTime(a.cooldown_until)}</p>
+                              )}
+                              {a.status === 'rate_limited' && !a.cooldown_until && (
+                                <p className="text-xs text-red-400 mt-1">No automatic reset scheduled</p>
+                              )}
+                              {a.last_error && (
+                                <p className="text-xs text-zinc-500 mt-1 truncate">Last error: {a.last_error}</p>
+                              )}
+                              {testResults[a.id] && (
+                                <p className={cn('text-xs mt-1', testResults[a.id].ok ? 'text-emerald-400' : 'text-red-400')}>
+                                  {testResults[a.id].ok ? `OK ${testResults[a.id].reply}` : `Failed ${testResults[a.id].error}`}
+                                </p>
+                              )}
+                            </div>
+                            <AccountDetails
+                              account={a}
+                              tokenUsage={tokenUsage}
+                              patchTier={() => patch.mutate({ id: a.id, body: { account_tier: a.account_tier === 'pro' ? 'free' : 'pro' } })}
+                            />
+                            <PingSection
+                              account={a}
+                              onResult={(r) => setTestResults(prev => ({ ...prev, [a.id]: r }))}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between gap-2 lg:justify-end">
+                            <span className={cn('badge', statusColor(a.status))}>{a.status.replace('_', ' ')}</span>
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => test.mutate(a.id)} disabled={test.isPending} className="btn-ghost p-2" title="Test"><TestTube2 size={14} /></button>
+                              <button onClick={() => patch.mutate({ id: a.id, body: { status: a.status === 'disabled' ? 'active' : 'disabled' } })} className="btn-ghost p-2" title={a.status === 'disabled' ? 'Enable' : 'Disable'}><Power size={14} /></button>
+                              <button onClick={() => { if (confirm('Delete this account?')) del.mutate(a.id) }} className="btn-danger p-2" title="Delete"><Trash2 size={14} /></button>
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                      {a.provider === 'openai' && (
-                        <button
-                          onClick={() => patch.mutate({ id: a.id, body: { account_tier: a.account_tier === 'pro' ? 'free' : 'pro' } })}
-                          className={cn('badge uppercase text-[10px]', a.account_tier === 'pro' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 bg-zinc-800 text-zinc-400')}
-                          title="Toggle OpenAI account tier"
-                        >
-                          {a.account_tier ?? 'free'}
-                        </button>
-                      )}
-                      <span className={cn('badge', statusColor(a.status))}>{a.status.replace('_', ' ')}</span>
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => test.mutate(a.id)} disabled={test.isPending} className="btn-ghost p-2" title="Test"><TestTube2 size={14} /></button>
-                        <button onClick={() => patch.mutate({ id: a.id, body: { status: a.status === 'disabled' ? 'active' : 'disabled' } })} className="btn-ghost p-2" title={a.status === 'disabled' ? 'Enable' : 'Disable'}><Power size={14} /></button>
-                        <button onClick={() => { if (confirm('Delete this account?')) del.mutate(a.id) }} className="btn-danger p-2" title="Delete"><Trash2 size={14} /></button>
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )
