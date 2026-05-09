@@ -127,10 +127,10 @@ router.post('/:id/test', async (req, res) => {
     };
 
     try {
-        const { listActiveAccounts } = await import('../db/accounts.js');
-        const actives = await listActiveAccounts(account.provider);
-        const active = actives.find(a => a.id === account.id);
-        if (!active) { res.status(400).json({ error: 'Account not active or no token' }); return; }
+        const { getDecryptedTokens } = await import('../db/accounts.js');
+        const tokens = await getDecryptedTokens(account.id);
+        if (!tokens?.accessToken) { res.status(400).json({ error: 'No access token — reconnect this account' }); return; }
+        const active = { ...account, access_token: tokens.accessToken } as any;
 
         const testModel = reqModel || DEFAULT_MODELS[account.provider] || 'gpt-5.4';
         let reply = '';
