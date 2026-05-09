@@ -224,9 +224,9 @@ function PingSection({
       onResult(data)
       qc.invalidateQueries({ queryKey: ['accounts'] })
     } catch (err: any) {
-      const data = { ok: false, error: err?.response?.data?.error ?? err.message }
-      setResult(data)
-      onResult(data)
+      const errData = err?.response?.data ?? { ok: false, error: err.message }
+      setResult(errData)
+      onResult(errData)
     } finally {
       setPinging(false)
     }
@@ -253,15 +253,39 @@ function PingSection({
           {pinging ? <RefreshCw size={12} className="animate-spin" /> : <Zap size={12} />}
           {pinging ? 'Pinging...' : 'Ping'}
         </button>
-        {result && (
-          <span className={cn('text-xs', result.ok ? 'text-emerald-400' : 'text-red-400')}>
-            {result.ok
-              ? `✓ ${result.reply?.slice(0, 50) || 'ok'} · ${result.latency_ms}ms`
-              : `✗ ${result.error?.slice(0, 80)}`
-            }
-          </span>
-        )}
       </div>
+      {result && (
+        <div className={cn(
+          'mt-2 px-3 py-2 rounded-lg text-xs border',
+          result.ok
+            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+            : result.rate_limited
+              ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+              : 'bg-red-500/10 border-red-500/30 text-red-300'
+        )}>
+          {result.ok ? (
+            <div className="flex items-center gap-2">
+              <span className="font-medium">✓ Working</span>
+              <span className="text-zinc-400">·</span>
+              <span>{model}</span>
+              <span className="text-zinc-400">·</span>
+              <span>{result.latency_ms}ms</span>
+              {result.recovered && <span className="ml-1 text-emerald-400 font-medium">· Auto-recovered!</span>}
+            </div>
+          ) : result.rate_limited ? (
+            <div className="flex items-center gap-2">
+              <span className="font-medium">⚠ Rate Limited</span>
+              <span className="text-zinc-400">— Account is connected but provider is throttling requests</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="font-medium">✗ Error</span>
+              <span className="text-zinc-400">·</span>
+              <span className="truncate">{result.error?.slice(0, 100)}</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

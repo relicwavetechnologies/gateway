@@ -154,9 +154,22 @@ router.post('/:id/test', async (req, res) => {
             await forwardToClaude(active, { model: testModel, messages: [{ role: 'user', content: prompt }], stream: false }, fakeRes);
         }
 
-        res.json({ ok: true, reply, model: testModel, latency_ms: Date.now() - start });
+        // If ping succeeded and account was rate_limited or auth_expired, auto-recover it
+        if (account.status === 'rate_limited' || account.status === 'auth_expired' || account.status === 'error') {
+            const { patchAccount } = await import('../db/accounts.js');
+            await patchAccount(account.id, { status: 'active' });
+            invalidateAccountPool(account.provider);
+        }
+
+        res.json({ ok: true, reply, model: testModel, latency_ms: Date.now() - start, recovered: account.status !== 'active' });
     } catch (err: unknown) {
-        res.status(500).json({ ok: false, error: (err as Error).message });
+        const msg = (err as Error).message;
+        const is429 = msg.includes('429');
+        res.status(is429 ? 200 : 500).json({
+            ok: false,
+            rate_limited: is429,
+            error: is429 ? 'Account is rate-limited by the provider' : msg,
+        });
     }
 });
 
