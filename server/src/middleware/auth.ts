@@ -13,10 +13,18 @@ declare global {
 }
 
 const SECRET = process.env.GATEWAY_SECRET ?? '';
+const SERVICE_KEY = process.env.GATEWAY_SERVICE_KEY ?? '';
 
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token) { res.status(401).json({ error: 'Missing authorization token' }); return; }
+
+    // Service-to-service auth: static key for machine clients (e.g. Divo backend)
+    if (SERVICE_KEY && token === SERVICE_KEY) {
+        req.uid = 'service';
+        next();
+        return;
+    }
 
     try {
         const decoded = jwt.verify(token, SECRET) as { email: string; role: string };
