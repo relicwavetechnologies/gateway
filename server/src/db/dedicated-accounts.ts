@@ -24,6 +24,7 @@ export interface DedicatedAccount {
     plan_type: string | null;
     credits_balance: number | null;
     api_key_id: string | null;
+    pkce_session_id: string | null;
     created_at: number;
     updated_at: number;
 }
@@ -60,6 +61,10 @@ export async function getDedicatedAccount(id: string): Promise<DedicatedAccount 
 export async function getDedicatedAccountByApiKeyId(apiKeyId: string): Promise<DedicatedAccount | undefined> {
     const [row] = await sql<DedicatedAccount[]>`SELECT * FROM dedicated_accounts WHERE api_key_id = ${apiKeyId}`;
     return row;
+}
+
+export async function storePkceSession(id: string, sessionId: string): Promise<void> {
+    await sql`UPDATE dedicated_accounts SET pkce_session_id = ${sessionId}, updated_at = ${now()} WHERE id = ${id}`;
 }
 
 export async function listDedicatedAccounts(): Promise<PublicDedicatedAccount[]> {

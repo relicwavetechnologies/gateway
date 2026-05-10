@@ -10,6 +10,7 @@ import {
     disconnectDedicatedAccount,
     setDedicatedStatus,
     getDecryptedDedicatedTokens,
+    storePkceSession,
 } from '../db/dedicated-accounts.js';
 import { createApiKey, revokeApiKeyById } from '../db/keys.js';
 import { forwardToOpenAI } from '../loadbalancer/openai.js';
@@ -42,9 +43,12 @@ router.post('/initiate', async (req, res) => {
     const account = await createDedicatedAccount({ ownerApp: owner_app, label, tier });
     const { sessionId, authUrl } = createSession();
 
+    // Store session_id in DB so complete only needs dedicated_account_id + callback_url
+    await storePkceSession(account.id, sessionId);
+
     res.json({
         auth_url: authUrl,
-        session_id: sessionId,
+        session_id: sessionId,           // still returned for clients that want to pass it explicitly
         dedicated_account_id: account.id,
         instructions: 'Click the link to authenticate with your OpenAI account. After login, copy the full callback URL from your browser address bar and paste it to POST /admin/dedicated/complete.',
     });
@@ -52,19 +56,22 @@ router.post('/initiate', async (req, res) => {
 
 // ── Complete OAuth and activate the dedicated account ─────────────────────────
 router.post('/complete', async (req, res) => {
-    const { dedicated_account_id, session_id, callback_url } = req.body as {
+    const { dedicated_account_id, session_id: sessionIdFromBody, callback_url } = req.body as {
         dedicated_account_id?: string;
         session_id?: string;
         callback_url?: string;
     };
 
     if (!dedicated_account_id) { res.status(400).json({ error: 'dedicated_account_id is required' }); return; }
-    if (!session_id) { res.status(400).json({ error: 'session_id is required' }); return; }
     if (!callback_url) { res.status(400).json({ error: 'callback_url is required' }); return; }
 
     const account = await getDedicatedAccount(dedicated_account_id);
     if (!account) { res.status(404).json({ error: 'Dedicated account not found' }); return; }
     if (account.status !== 'pending') { res.status(409).json({ error: `Account is already ${account.status}` }); return; }
+
+    // Use session_id from body if provided, else fall back to the one stored during initiate
+    const session_id = sessionIdFromBody ?? account.pkce_session_id ?? '';
+    if (!session_id) { res.status(400).json({ error: 'session_id is required (or call /initiate again to get a fresh one)' }); return; }
 
     // Extract code from callback URL
     let code: string;
