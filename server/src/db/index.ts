@@ -6,6 +6,7 @@ const sql = postgres(process.env.DATABASE_URL, {
     ssl: 'require',
     max: 10,
     idle_timeout: 30,
+    prepare: false,  // Neon uses pgBouncer in transaction mode — prepared statements don't survive connection reuse
 });
 
 export default sql;
@@ -109,6 +110,7 @@ export async function initSchema(): Promise<void> {
             plan_type               TEXT,
             credits_balance         REAL,
             api_key_id              TEXT REFERENCES api_keys(id) ON DELETE SET NULL,
+            pkce_session_id         TEXT,
             created_at              BIGINT NOT NULL,
             updated_at              BIGINT NOT NULL
         )
@@ -134,6 +136,7 @@ export async function initSchema(): Promise<void> {
     await sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS codex_updated_at BIGINT`;
     await sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS recovered_at BIGINT`;
     await sql`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS is_dedicated INTEGER NOT NULL DEFAULT 0`;
+    await sql`ALTER TABLE dedicated_accounts ADD COLUMN IF NOT EXISTS pkce_session_id TEXT`;
 
     await sql`
         ALTER TABLE accounts
