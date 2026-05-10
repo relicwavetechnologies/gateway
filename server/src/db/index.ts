@@ -87,10 +87,39 @@ export async function initSchema(): Promise<void> {
         )
     `;
 
+    await sql`
+        CREATE TABLE IF NOT EXISTS dedicated_accounts (
+            id                      TEXT PRIMARY KEY,
+            owner_app               TEXT NOT NULL,
+            label                   TEXT,
+            provider                TEXT NOT NULL DEFAULT 'openai',
+            tier                    TEXT NOT NULL DEFAULT 'pro',
+            access_token_enc        TEXT,
+            refresh_token_enc       TEXT,
+            oauth_expires_at        BIGINT,
+            status                  TEXT NOT NULL DEFAULT 'pending',
+            cooldown_until          BIGINT,
+            last_error              TEXT,
+            last_used_at            BIGINT,
+            request_count           BIGINT NOT NULL DEFAULT 0,
+            primary_used_percent    REAL,
+            primary_reset_at        BIGINT,
+            secondary_used_percent  REAL,
+            secondary_reset_at      BIGINT,
+            plan_type               TEXT,
+            credits_balance         REAL,
+            api_key_id              TEXT REFERENCES api_keys(id) ON DELETE SET NULL,
+            created_at              BIGINT NOT NULL,
+            updated_at              BIGINT NOT NULL
+        )
+    `;
+
     await sql`CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_logs(created_at DESC)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_usage_account ON usage_logs(account_id)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_alerts_resolved ON alerts(resolved, last_seen DESC)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_keys_hash ON api_keys(hashed_key)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_dedicated_owner ON dedicated_accounts(owner_app)`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_dedicated_api_key ON dedicated_accounts(api_key_id)`;
 
     await sql`
         ALTER TABLE accounts
@@ -104,6 +133,7 @@ export async function initSchema(): Promise<void> {
     await sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS codex_credits REAL`;
     await sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS codex_updated_at BIGINT`;
     await sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS recovered_at BIGINT`;
+    await sql`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS is_dedicated INTEGER NOT NULL DEFAULT 0`;
 
     await sql`
         ALTER TABLE accounts

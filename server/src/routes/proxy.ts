@@ -17,6 +17,8 @@ import { forwardToGemini, isProModel, MIN_PRO_ACCOUNTS, LITE_MODELS } from '../l
 import { logUsage, createAlert, getUnEmailedAlerts, markAlertEmailed } from '../db/usage.js';
 import { sendAlert } from '../utils/email.js';
 import { updateAccountCodexHeaders, type ActiveAccount, type CodexHeaders } from '../db/accounts.js';
+import { getDedicatedAccountByApiKeyId, recordDedicatedUsage, updateDedicatedRateLimits } from '../db/dedicated-accounts.js';
+import { decrypt } from '../utils/crypto.js';
 import { logLatency } from '../utils/timing.js';
 
 const router = Router();
@@ -77,6 +79,93 @@ async function callProvider(
     return forwardToClaude(account, body as any, res);
 }
 
+async function handleDedicatedRequest(req: Request, res: Response): Promise<void> {
+    const apiKey = req.apiKey;
+    const dedicatedAccount = await getDedicatedAccountByApiKeyId(apiKey.id);
+
+    if (!dedicatedAccount) {
+        res.status(503).json({ error: 'Dedicated account not found for this key' });
+        return;
+    }
+    if (dedicatedAccount.status !== 'active') {
+        res.status(503).json({ error: 'Dedicated account is not active', status: dedicatedAccount.status });
+        return;
+    }
+    if (dedicatedAccount.cooldown_until && dedicatedAccount.cooldown_until > Date.now()) {
+        res.status(429).json({
+            error: 'Dedicated account is cooling down',
+            retry_after: new Date(Number(dedicatedAccount.cooldown_until)).toISOString(),
+        });
+        return;
+    }
+
+    let accessToken: string;
+    try {
+        if (!dedicatedAccount.access_token_enc) throw new Error('No access token stored');
+        accessToken = decrypt(dedicatedAccount.access_token_enc);
+    } catch {
+        res.status(503).json({ error: 'Dedicated account token unavailable — reconnect the account' });
+        return;
+    }
+
+    const fakeAccount: ActiveAccount = {
+        id: dedicatedAccount.id,
+        access_token: accessToken,
+        label: dedicatedAccount.label ?? dedicatedAccount.owner_app,
+        provider: 'openai',
+        account_tier: dedicatedAccount.tier,
+        status: 'active',
+        cooldown_until: null,
+        request_count: Number(dedicatedAccount.request_count),
+        error_count: 0,
+        last_error: null,
+        last_used_at: dedicatedAccount.last_used_at,
+        codex_plan_type: dedicatedAccount.plan_type,
+        codex_primary_pct: dedicatedAccount.primary_used_percent,
+        codex_primary_reset: dedicatedAccount.primary_reset_at,
+        codex_secondary_pct: dedicatedAccount.secondary_used_percent,
+        codex_secondary_reset: dedicatedAccount.secondary_reset_at,
+        codex_credits: dedicatedAccount.credits_balance,
+        codex_updated_at: null,
+        recovered_at: null,
+        created_at: dedicatedAccount.created_at,
+        created_by: dedicatedAccount.owner_app,
+        oauth_expires_at: dedicatedAccount.oauth_expires_at,
+    };
+
+    const model = (req.body as { model?: string }).model ?? 'gpt-5.4';
+    const start = Date.now();
+
+    try {
+        const result = await forwardToOpenAI(fakeAccount, req.body as Parameters<typeof forwardToOpenAI>[1], res);
+
+        recordDedicatedUsage(dedicatedAccount.id).catch(() => null);
+        if (result.codexHeaders) {
+            updateDedicatedRateLimits(dedicatedAccount.id, result.codexHeaders).catch(() => null);
+        }
+
+        await logUsage({
+            id: uuid(), apiKeyId: apiKey.id, accountId: dedicatedAccount.id,
+            provider: 'openai', model, statusCode: 200, latencyMs: Date.now() - start,
+            error: null, promptTokens: undefined, completionTokens: undefined,
+        });
+    } catch (err: unknown) {
+        const axiosErr = err as { response?: { status?: number; data?: unknown }; message?: string; code?: string };
+        const statusCode = axiosErr.response?.status ?? 500;
+        const message = providerErrorMessage(axiosErr);
+
+        await logUsage({
+            id: uuid(), apiKeyId: apiKey.id, accountId: dedicatedAccount.id,
+            provider: 'openai', model, statusCode, latencyMs: Date.now() - start,
+            error: message, promptTokens: undefined, completionTokens: undefined,
+        });
+
+        if (!res.headersSent) {
+            res.status(statusCode === 429 ? 429 : 502).json({ error: message });
+        }
+    }
+}
+
 async function proxyRequest(
     forcedProvider: 'openai' | 'claude' | 'gemini' | null,
     req: Request,
@@ -85,6 +174,12 @@ async function proxyRequest(
     const model = (req.body as { model?: string }).model ?? 'unknown';
     const provider = forcedProvider ?? detectProvider(model);
     const apiKey = req.apiKey;
+
+    // Dedicated keys bypass the pool entirely and route to a single fixed account
+    if (apiKey.is_dedicated) {
+        await handleDedicatedRequest(req, res);
+        return;
+    }
 
     if (!apiKey.allowed_providers.includes(provider)) {
         res.status(403).json({ error: `This API key is not allowed to use ${provider}` });

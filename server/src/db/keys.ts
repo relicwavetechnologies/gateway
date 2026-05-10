@@ -12,6 +12,7 @@ export interface ApiKey {
     created_by: string;
     last_used_at: number | null;
     revoked: number;
+    is_dedicated: number; // 0 = normal pool key, 1 = dedicated account key
 }
 
 export interface ApiKeyPublic extends Omit<ApiKey, 'hashed_key' | 'allowed_providers'> {
@@ -42,12 +43,13 @@ export async function createApiKey(params: {
     allowedProviders: string[];
     rateLimitRpm: number | null;
     createdBy: string;
+    isDedicated?: boolean;
 }): Promise<{ raw: string; metadata: ApiKeyPublic }> {
-    const { id, name, allowedProviders, rateLimitRpm, createdBy } = params;
+    const { id, name, allowedProviders, rateLimitRpm, createdBy, isDedicated = false } = params;
     const { raw, hashed, prefix } = generateKey();
     const [row] = await sql<ApiKey[]>`
-        INSERT INTO api_keys (id, hashed_key, key_prefix, name, allowed_providers, rate_limit_rpm, created_at, created_by)
-        VALUES (${id}, ${hashed}, ${prefix}, ${name}, ${allowedProviders.join(',')}, ${rateLimitRpm}, ${now()}, ${createdBy})
+        INSERT INTO api_keys (id, hashed_key, key_prefix, name, allowed_providers, rate_limit_rpm, created_at, created_by, is_dedicated)
+        VALUES (${id}, ${hashed}, ${prefix}, ${name}, ${allowedProviders.join(',')}, ${rateLimitRpm}, ${now()}, ${createdBy}, ${isDedicated ? 1 : 0})
         RETURNING *
     `;
     return { raw, metadata: sanitize(row) };
@@ -79,6 +81,10 @@ export function touchApiKey(id: string): void {
 
 export async function revokeApiKey(id: string, createdBy: string): Promise<void> {
     await sql`UPDATE api_keys SET revoked = 1 WHERE id = ${id} AND created_by = ${createdBy}`;
+}
+
+export async function revokeApiKeyById(id: string): Promise<void> {
+    await sql`UPDATE api_keys SET revoked = 1 WHERE id = ${id}`;
 }
 
 function sanitize(row: ApiKey): ApiKeyPublic {
