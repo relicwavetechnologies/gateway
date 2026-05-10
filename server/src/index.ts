@@ -6,6 +6,7 @@ import { initSchema } from './db/index.js';
 
 import authRouter from './routes/auth.js';
 import adminAccountsRouter from './routes/admin.accounts.js';
+import adminDedicatedRouter from './routes/admin.dedicated.js';
 import adminKeysRouter from './routes/admin.keys.js';
 import adminUsageRouter from './routes/admin.usage.js';
 import proxyRouter from './routes/proxy.js';
@@ -19,6 +20,7 @@ app.use(express.json({ limit: '4mb' }));
 
 app.use('/auth', authRouter);
 app.use('/admin/accounts', adminAccountsRouter);
+app.use('/admin/dedicated', adminDedicatedRouter);
 app.use('/admin/api-keys', adminKeysRouter);
 app.use('/admin/usage', adminUsageRouter);
 app.use('/v1', proxyRouter);
