@@ -6,6 +6,7 @@ const sql = postgres(process.env.DATABASE_URL, {
     ssl: 'require',
     max: 10,
     idle_timeout: 30,
+    prepare: false,  // Neon uses pgBouncer in transaction mode — prepared statements don't survive connection reuse
 });
 
 export default sql;
