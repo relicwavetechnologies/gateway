@@ -48,23 +48,41 @@ function finiteNumber(value: number | undefined): number | undefined {
     return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-export async function getExpiringGeminiAccounts(threshold: number): Promise<Pick<Account, 'id' | 'label'>[]> {
+export async function getExpiringGeminiAccounts(threshold: number, authExpiredRetryBefore = 0): Promise<Pick<Account, 'id' | 'label'>[]> {
     return sql<Pick<Account, 'id' | 'label'>[]>`
         SELECT id, label FROM accounts
         WHERE provider = 'gemini'
-          AND status IN ('active', 'rate_limited')
-          AND oauth_expires_at IS NOT NULL
-          AND oauth_expires_at < ${threshold}
+          AND (
+              (
+                  status IN ('active', 'rate_limited')
+                  AND oauth_expires_at IS NOT NULL
+                  AND oauth_expires_at < ${threshold}
+              )
+              OR (
+                  status = 'auth_expired'
+                  AND refresh_token_enc IS NOT NULL
+                  AND (last_used_at IS NULL OR last_used_at < ${authExpiredRetryBefore})
+              )
+          )
     `;
 }
 
-export async function getExpiringClaudeAccounts(threshold: number): Promise<Pick<Account, 'id' | 'label'>[]> {
+export async function getExpiringClaudeAccounts(threshold: number, authExpiredRetryBefore = 0): Promise<Pick<Account, 'id' | 'label'>[]> {
     return sql<Pick<Account, 'id' | 'label'>[]>`
         SELECT id, label FROM accounts
         WHERE provider = 'claude'
-          AND status IN ('active', 'rate_limited')
-          AND oauth_expires_at IS NOT NULL
-          AND oauth_expires_at < ${threshold}
+          AND (
+              (
+                  status IN ('active', 'rate_limited')
+                  AND oauth_expires_at IS NOT NULL
+                  AND oauth_expires_at < ${threshold}
+              )
+              OR (
+                  status = 'auth_expired'
+                  AND refresh_token_enc IS NOT NULL
+                  AND (last_used_at IS NULL OR last_used_at < ${authExpiredRetryBefore})
+              )
+          )
     `;
 }
 
@@ -186,14 +204,29 @@ export async function recordAccountError(id: string, error: string): Promise<voi
     `;
 }
 
+export async function markAccountAuthExpired(id: string, error: string): Promise<void> {
+    await sql`
+        UPDATE accounts
+        SET status = 'auth_expired',
+            cooldown_until = NULL,
+            error_count = error_count + 1,
+            last_error = ${error},
+            last_used_at = ${now()}
+        WHERE id = ${id}
+    `;
+}
+
 export async function updateAccountTokens(id: string, accessToken: string, refreshToken: string | null, expiresAt: Date | null): Promise<void> {
+    const ts = now();
     await sql`
         UPDATE accounts
         SET access_token_enc = ${encrypt(accessToken)},
             refresh_token_enc = ${refreshToken ? encrypt(refreshToken) : null},
             oauth_expires_at = ${expiresAt ? expiresAt.getTime() : null},
             status = 'active',
-            cooldown_until = NULL
+            cooldown_until = NULL,
+            last_error = NULL,
+            recovered_at = CASE WHEN status = 'auth_expired' THEN ${ts} ELSE recovered_at END
         WHERE id = ${id}
     `;
 }
@@ -227,13 +260,22 @@ export async function getDecryptedTokens(id: string): Promise<{ accessToken: str
     };
 }
 
-export async function getExpiringOpenAIAccounts(threshold: number): Promise<Pick<Account, 'id' | 'label'>[]> {
+export async function getExpiringOpenAIAccounts(threshold: number, authExpiredRetryBefore = 0): Promise<Pick<Account, 'id' | 'label'>[]> {
     return sql<Pick<Account, 'id' | 'label'>[]>`
         SELECT id, label FROM accounts
         WHERE provider = 'openai'
-          AND status IN ('active', 'rate_limited')
-          AND oauth_expires_at IS NOT NULL
-          AND oauth_expires_at < ${threshold}
+          AND (
+              (
+                  status IN ('active', 'rate_limited')
+                  AND oauth_expires_at IS NOT NULL
+                  AND oauth_expires_at < ${threshold}
+              )
+              OR (
+                  status = 'auth_expired'
+                  AND refresh_token_enc IS NOT NULL
+                  AND (last_used_at IS NULL OR last_used_at < ${authExpiredRetryBefore})
+              )
+          )
     `;
 }
 

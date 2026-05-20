@@ -105,6 +105,7 @@ export async function updateDedicatedTokens(
             refresh_token_enc = ${refreshToken ? encrypt(refreshToken) : null},
             oauth_expires_at = ${expiresAt ? expiresAt.getTime() : null},
             status = 'active',
+            last_error = NULL,
             updated_at = ${ts}
         WHERE id = ${id}
     `;
@@ -167,12 +168,21 @@ export async function disconnectDedicatedAccount(id: string): Promise<{ apiKeyId
     return { apiKeyId: row?.api_key_id ?? null };
 }
 
-export async function getExpiringDedicatedAccounts(threshold: number): Promise<Pick<DedicatedAccount, 'id' | 'label' | 'owner_app'>[]> {
+export async function getExpiringDedicatedAccounts(threshold: number, authExpiredRetryBefore = 0): Promise<Pick<DedicatedAccount, 'id' | 'label' | 'owner_app'>[]> {
     return sql<Pick<DedicatedAccount, 'id' | 'label' | 'owner_app'>[]>`
         SELECT id, label, owner_app FROM dedicated_accounts
-        WHERE status = 'active'
-          AND oauth_expires_at IS NOT NULL
-          AND oauth_expires_at < ${threshold}
+        WHERE (
+            (
+                status = 'active'
+                AND oauth_expires_at IS NOT NULL
+                AND oauth_expires_at < ${threshold}
+            )
+            OR (
+                status = 'auth_expired'
+                AND refresh_token_enc IS NOT NULL
+                AND updated_at < ${authExpiredRetryBefore}
+            )
+        )
     `;
 }
 
