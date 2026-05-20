@@ -24,9 +24,26 @@ import { logLatency } from '../utils/timing.js';
 const router = Router();
 router.use(requireApiKey);
 
-function detectProvider(model: string): 'openai' | 'claude' | 'gemini' {
+type Provider = 'openai' | 'claude' | 'gemini';
+
+const AVAILABLE_MODEL_FAMILIES = [
+    'OpenAI/Codex: gpt-5.4, gpt-5.4-mini, gpt-5.5, gpt-5.3-codex, plus common gpt-4/o-series aliases',
+    'Gemini: model names starting with gemini-',
+    'Claude: model names starting with claude-',
+];
+
+function unavailableModelMessage(model: string): string {
+    return `Model "${model}" is not available through Gateway. Available model families: ${AVAILABLE_MODEL_FAMILIES.join('; ')}.`;
+}
+
+function isExternalProviderModel(model: string): boolean {
+    return model.includes('/');
+}
+
+function detectProvider(model: string): Provider | null {
     if (model.startsWith('gemini-')) return 'gemini';
     if (model.startsWith('claude-')) return 'claude';
+    if (isExternalProviderModel(model)) return null;
     return 'openai';
 }
 
@@ -69,7 +86,7 @@ function providerErrorMessage(err: { response?: { data?: unknown }; message?: st
 }
 
 async function callProvider(
-    provider: 'openai' | 'claude' | 'gemini',
+    provider: Provider,
     account: ActiveAccount,
     body: unknown,
     res: Response,
@@ -167,13 +184,23 @@ async function handleDedicatedRequest(req: Request, res: Response): Promise<void
 }
 
 async function proxyRequest(
-    forcedProvider: 'openai' | 'claude' | 'gemini' | null,
+    forcedProvider: Provider | null,
     req: Request,
     res: Response,
 ): Promise<void> {
     const model = (req.body as { model?: string }).model ?? 'unknown';
     const provider = forcedProvider ?? detectProvider(model);
     const apiKey = req.apiKey;
+
+    if (!provider) {
+        res.status(400).json({
+            error: unavailableModelMessage(model),
+            code: 'model_not_available',
+            model,
+            available_model_families: AVAILABLE_MODEL_FAMILIES,
+        });
+        return;
+    }
 
     // Dedicated keys bypass the pool entirely and route to a single fixed account
     if (apiKey.is_dedicated) {
@@ -333,7 +360,7 @@ async function proxyRequest(
     });
 }
 
-// OpenAI-compatible — auto-routes by model prefix (gemini-* → Gemini, claude-* → Claude, else → OpenAI)
+// OpenAI-compatible — auto-routes by model prefix (gemini-* → Gemini, claude-* → Claude, OpenAI-ish names → OpenAI)
 router.post('/chat/completions', (req, res) => proxyRequest(null, req, res));
 // Anthropic-compatible
 router.post('/messages', (req, res) => proxyRequest('claude', req, res));

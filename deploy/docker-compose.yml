@@ -21,6 +21,19 @@ services:
       retries: 5
       start_period: 20s
 
+  worker:
+    image: ghcr.io/relicwavetechnologies/gateway-api:${IMAGE_TAG:-latest}
+    container_name: gateway-worker
+    restart: unless-stopped
+    command: ["node", "dist/worker/index.js"]
+    env_file:
+      - /etc/gateway/gateway.env
+    networks:
+      - gateway
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+
   web:
     image: ghcr.io/relicwavetechnologies/gateway-web:${IMAGE_TAG:-latest}
     container_name: gateway-web
@@ -48,6 +61,7 @@ services:
       - 8.8.8.8
     depends_on:
       - api
+      - worker
       - web
 
 networks:
