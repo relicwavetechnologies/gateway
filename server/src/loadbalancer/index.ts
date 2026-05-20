@@ -5,6 +5,7 @@ import {
     markAccountRateLimited,
     ActiveAccount,
 } from '../db/accounts.js';
+import { resolveAccountAlerts, resolveProviderAllDownAlerts } from '../db/usage.js';
 import { getCachedActiveAccounts, invalidateAccountPool } from '../cache/hotpath.js';
 
 // ─── In-memory state ──────────────────────────────────────────────────────────
@@ -186,11 +187,13 @@ export async function handleServerError(accountId: string, error: string): Promi
     await recordAccountError(accountId, error);
 }
 
-export async function handleSuccess(accountId: string): Promise<void> {
+export async function handleSuccess(accountId: string, provider?: string): Promise<void> {
     consecutiveFailures.delete(accountId);
     inMemoryCooldown.delete(accountId);
     // Keep lastAssigned — it's the LRU anchor and should reflect actual use.
     await recordAccountSuccess(accountId);
+    await resolveAccountAlerts(accountId);
+    if (provider) await resolveProviderAllDownAlerts(provider);
 }
 
 export async function handleUnknownError(accountId: string, error: string): Promise<void> {

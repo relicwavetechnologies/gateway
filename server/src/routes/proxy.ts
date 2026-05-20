@@ -266,7 +266,7 @@ async function proxyRequest(
             promptTokens = result.promptTokens;
             completionTokens = result.completionTokens;
 
-            await handleSuccess(account.id);
+            await handleSuccess(account.id, provider);
             if (provider === 'openai' && result.codexHeaders) {
                 updateAccountCodexHeaders(account.id, result.codexHeaders)
                     .catch(err => console.error(`[proxy] failed to persist codex headers for ${account.id}:`, err));

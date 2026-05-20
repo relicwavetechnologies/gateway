@@ -1,7 +1,7 @@
 import '../utils/env.js';
 import { getDecryptedTokens, updateAccountTokens, markAccountAuthExpired, getExpiringOpenAIAccounts, getExpiringGeminiAccounts, getExpiringClaudeAccounts, resetExpiredCooldowns } from '../db/accounts.js';
 import { getExpiringDedicatedAccounts, getDecryptedDedicatedTokens, updateDedicatedTokens, setDedicatedStatus } from '../db/dedicated-accounts.js';
-import { createAlert, markAlertEmailed, getUnEmailedAlerts } from '../db/usage.js';
+import { createAlert, markAlertEmailed, getUnEmailedAlerts, resolveAccountAlerts, resolveProviderAllDownAlerts } from '../db/usage.js';
 import { refreshToken as refreshOpenAIToken } from '../oauth/openai.js';
 import { refreshGeminiToken } from '../oauth/gemini.js';
 import { refreshClaudeToken } from '../oauth/claude.js';
@@ -34,6 +34,8 @@ async function refreshExpiringTokens(): Promise<void> {
         try {
             const { accessToken, refreshToken: newRefresh, expiresAt } = await refreshOpenAIToken(tokens.refreshToken);
             await updateAccountTokens(account.id, accessToken, newRefresh, expiresAt);
+            await resolveAccountAlerts(account.id);
+            await resolveProviderAllDownAlerts('openai');
             invalidateAccountPool('openai');
             console.log(`[worker] Refreshed OpenAI token for ${account.label}, expires ${expiresAt}`);
         } catch (err: unknown) {
@@ -62,6 +64,8 @@ async function refreshExpiringTokens(): Promise<void> {
         try {
             const { accessToken, expiresAt } = await refreshGeminiToken(tokens.refreshToken);
             await updateAccountTokens(account.id, accessToken, tokens.refreshToken, expiresAt);
+            await resolveAccountAlerts(account.id);
+            await resolveProviderAllDownAlerts('gemini');
             invalidateAccountPool('gemini');
             console.log(`[worker] Refreshed Gemini token for ${account.label}, expires ${expiresAt}`);
         } catch (err: unknown) {
@@ -91,6 +95,8 @@ async function refreshExpiringTokens(): Promise<void> {
             const { accessToken, refreshToken: newRefresh, expiresAt } = await refreshClaudeToken(tokens.refreshToken);
             // Anthropic rotates refresh tokens — store the new one
             await updateAccountTokens(account.id, accessToken, newRefresh, expiresAt);
+            await resolveAccountAlerts(account.id);
+            await resolveProviderAllDownAlerts('claude');
             invalidateAccountPool('claude');
             console.log(`[worker] Refreshed Claude token for ${account.label}, expires ${expiresAt}`);
         } catch (err: unknown) {
@@ -121,6 +127,8 @@ async function refreshDedicatedAccounts(): Promise<void> {
         try {
             const { accessToken, refreshToken: newRefresh, expiresAt } = await refreshOpenAIToken(tokens.refreshToken);
             await updateDedicatedTokens(account.id, accessToken, newRefresh, expiresAt);
+            await resolveAccountAlerts(account.id);
+            await resolveProviderAllDownAlerts('openai');
             console.log(`[worker] Refreshed dedicated token for ${label}, expires ${expiresAt}`);
         } catch (err: unknown) {
             const msg = (err as Error).message;

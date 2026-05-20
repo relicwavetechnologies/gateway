@@ -174,7 +174,7 @@ async function callLLMText(
             completionTokens = res.data.usageMetadata?.candidatesTokenCount;
         }
 
-        await handleSuccess(account.id);
+        await handleSuccess(account.id, provider);
         return { text, promptTokens, completionTokens, accountId: account.id };
 
     } catch (err: unknown) {

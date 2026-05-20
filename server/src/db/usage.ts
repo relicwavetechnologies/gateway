@@ -206,12 +206,32 @@ export async function resolveAlert(id: string): Promise<void> {
     await sql`UPDATE alerts SET resolved = 1 WHERE id = ${id}`;
 }
 
+export async function resolveAccountAlerts(accountId: string): Promise<void> {
+    await sql`
+        UPDATE alerts
+        SET resolved = 1
+        WHERE resolved = 0
+          AND account_id = ${accountId}
+          AND kind IN ('auth_expired', 'rate_limit')
+    `;
+}
+
+export async function resolveProviderAllDownAlerts(provider: string): Promise<void> {
+    await sql`
+        UPDATE alerts
+        SET resolved = 1
+        WHERE resolved = 0
+          AND provider = ${provider}
+          AND account_id IS NULL
+          AND kind = 'all_down'
+    `;
+}
+
 export async function getUnEmailedAlerts(): Promise<Alert[]> {
-    const oneHourAgo = now() - 3_600_000;
     return sql<Alert[]>`
         SELECT * FROM alerts
         WHERE resolved = 0
-          AND (emailed_at IS NULL OR emailed_at < ${oneHourAgo})
+          AND emailed_at IS NULL
         ORDER BY last_seen DESC
     `;
 }
