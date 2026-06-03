@@ -65,20 +65,14 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Copy compose & Caddyfile to VM
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "deploy/docker-compose.yml,deploy/Caddyfile"
-          target: "/opt/gateway/"
-          strip_components: 1
-          overwrite: true
-
-      - name: Pull & restart on VM
+      # IMPORTANT: This VM is a SHARED host. `gateway-caddy` is the ingress for
+      # several other apps (divo, mr-market, airnote, visa-monitoring) and the
+      # on-box /opt/gateway/Caddyfile + docker-compose.yml are customized for that.
+      # We therefore do NOT scp deploy/Caddyfile or deploy/docker-compose.yml here
+      # (doing so would wipe the other apps' routing). Compose/Caddy changes for
+      # this host are applied manually. This job only ships new gateway IMAGES and
+      # restarts gateway's own services — never caddy.
+      - name: Pull new images & restart gateway services on VM
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -89,12 +83,12 @@ jobs:
             cd /opt/gateway
             export IMAGE_TAG=${{ needs.build-and-push.outputs.sha }}
             echo "IMAGE_TAG=$IMAGE_TAG" > .env
-            docker compose pull
-            docker compose up -d --remove-orphans
+            # Recreate ONLY gateway's own services. Never touch caddy (shared ingress).
+            docker compose pull api worker web
+            docker compose up -d --no-deps api worker web
             docker image prune -f
             for i in 1 2 3 4 5 6 7 8 9 10; do
-              if curl -fsS http://127.0.0.1/health 2>/dev/null \
-                || curl -fsS https://gateway.outreachdeal.com/health 2>/dev/null; then
+              if curl -fsS https://gateway.outreachdeal.com/health 2>/dev/null; then
                 echo "Health OK"
                 exit 0
               fi
