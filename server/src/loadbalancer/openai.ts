@@ -10,23 +10,25 @@ const ENDPOINT = 'https://chatgpt.com/backend-api/codex/responses';
 // Unknown names pass through — the API returns the error.
 const MODEL_ALIASES: Record<string, string> = {
     // GPT-4o family → latest internal equivalent
-    'gpt-4o':             'gpt-5.4',
+    'gpt-4o':             'gpt-5.5',
     'gpt-4o-mini':        'gpt-5.4-mini',
-    'gpt-4o-2024-11-20':  'gpt-5.4',
-    'gpt-4o-2024-08-06':  'gpt-5.4',
+    'gpt-4o-2024-11-20':  'gpt-5.5',
+    'gpt-4o-2024-08-06':  'gpt-5.5',
     // GPT-4 family
-    'gpt-4':              'gpt-5.4',
-    'gpt-4-turbo':        'gpt-5.4',
+    'gpt-4':              'gpt-5.5',
+    'gpt-4-turbo':        'gpt-5.5',
     // o-series → codex
-    'o1':                 'gpt-5.3-codex',
+    'o1':                 'gpt-5.5',
     'o1-mini':            'gpt-5.4-mini',
-    'o3':                 'gpt-5.3-codex',
+    'o3':                 'gpt-5.5',
     'o3-mini':            'gpt-5.4-mini',
     'o4-mini':            'gpt-5.4-mini',
-    // Canonical names pass through unchanged (still listed for clarity)
-    'gpt-5.4':            'gpt-5.4',
+    // Canonical names pass through unchanged (still listed for clarity).
+    // gpt-5.4 and gpt-5.3-codex are deprecated upstream → remapped to gpt-5.5.
+    'gpt-5.5':            'gpt-5.5',
     'gpt-5.4-mini':       'gpt-5.4-mini',
-    'gpt-5.3-codex':      'gpt-5.3-codex',
+    'gpt-5.4':            'gpt-5.5',
+    'gpt-5.3-codex':      'gpt-5.5',
 };
 
 function normalizeModel(model: string): string {

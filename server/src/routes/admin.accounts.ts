@@ -121,7 +121,7 @@ router.post('/:id/test', async (req, res) => {
     const prompt = reqMessage || 'say "ok" only';
 
     const DEFAULT_MODELS: Record<string, string> = {
-        openai: 'gpt-5.4',
+        openai: 'gpt-5.5',
         gemini: 'gemini-2.5-flash',
         claude: 'claude-sonnet-4-6',
     };
@@ -132,7 +132,7 @@ router.post('/:id/test', async (req, res) => {
         if (!tokens?.accessToken) { res.status(400).json({ error: 'No access token — reconnect this account' }); return; }
         const active = { ...account, access_token: tokens.accessToken } as any;
 
-        const testModel = reqModel || DEFAULT_MODELS[account.provider] || 'gpt-5.4';
+        const testModel = reqModel || DEFAULT_MODELS[account.provider] || 'gpt-5.5';
         let reply = '';
         const start = Date.now();
 

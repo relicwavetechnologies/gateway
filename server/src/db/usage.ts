@@ -208,10 +208,31 @@ export async function resolveAlert(id: string): Promise<void> {
 
 export async function getUnEmailedAlerts(): Promise<Alert[]> {
     const oneHourAgo = now() - 3_600_000;
+    // rate_limit is a normal, self-healing event — keep it stored/visible in the
+    // dashboard but never email it (it was the main source of inbox spam).
     return sql<Alert[]>`
         SELECT * FROM alerts
         WHERE resolved = 0
+          AND kind <> 'rate_limit'
           AND (emailed_at IS NULL OR emailed_at < ${oneHourAgo})
         ORDER BY last_seen DESC
     `;
+}
+
+// Auto-resolve stale alerts so they stop re-emailing once the condition clears.
+// Called from the worker tick (off the hot path). Resolves:
+//   • any open alert tied to an account that is now healthy (status='active')
+//   • 'all_down' alerts that haven't recurred in 15 min (pool recovered)
+export async function autoResolveRecoveredAlerts(): Promise<number> {
+    const staleAllDownBefore = now() - 15 * 60_000;
+    const rows = await sql`
+        UPDATE alerts SET resolved = 1
+        WHERE resolved = 0
+          AND (
+              account_id IN (SELECT id FROM accounts WHERE status = 'active')
+              OR (kind = 'all_down' AND last_seen < ${staleAllDownBefore})
+          )
+        RETURNING id
+    `;
+    return rows.length;
 }

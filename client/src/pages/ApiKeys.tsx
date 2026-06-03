@@ -7,7 +7,7 @@ import { cn, relativeTime } from '../lib/utils'
 const MODELS: Record<string, { label: string; models: string[] }> = {
   openai: {
     label: '🤖 OpenAI',
-    models: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex'],
+    models: ['gpt-5.5', 'gpt-5.4-mini'],
   },
   gemini: {
     label: '✨ Gemini',
