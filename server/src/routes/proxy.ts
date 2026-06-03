@@ -27,7 +27,7 @@ router.use(requireApiKey);
 type Provider = 'openai' | 'claude' | 'gemini';
 
 const AVAILABLE_MODEL_FAMILIES = [
-    'OpenAI/Codex: gpt-5.4, gpt-5.4-mini, gpt-5.5, gpt-5.3-codex, plus common gpt-4/o-series aliases',
+    'OpenAI/Codex: gpt-5.5, gpt-5.4-mini, plus common gpt-4/o-series aliases',
     'Gemini: model names starting with gemini-',
     'Claude: model names starting with claude-',
 ];
@@ -150,7 +150,7 @@ async function handleDedicatedRequest(req: Request, res: Response): Promise<void
         oauth_expires_at: dedicatedAccount.oauth_expires_at,
     };
 
-    const model = (req.body as { model?: string }).model ?? 'gpt-5.4';
+    const model = (req.body as { model?: string }).model ?? 'gpt-5.5';
     const start = Date.now();
 
     try {

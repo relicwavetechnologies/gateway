@@ -1,7 +1,7 @@
 import '../utils/env.js';
 import { getDecryptedTokens, updateAccountTokens, markAccountAuthExpired, getExpiringOpenAIAccounts, getExpiringGeminiAccounts, getExpiringClaudeAccounts, resetExpiredCooldowns } from '../db/accounts.js';
 import { getExpiringDedicatedAccounts, getDecryptedDedicatedTokens, updateDedicatedTokens, setDedicatedStatus } from '../db/dedicated-accounts.js';
-import { createAlert, markAlertEmailed, getUnEmailedAlerts } from '../db/usage.js';
+import { createAlert, markAlertEmailed, getUnEmailedAlerts, autoResolveRecoveredAlerts } from '../db/usage.js';
 import { refreshToken as refreshOpenAIToken } from '../oauth/openai.js';
 import { refreshGeminiToken } from '../oauth/gemini.js';
 import { refreshClaudeToken } from '../oauth/claude.js';
@@ -145,9 +145,15 @@ async function tick(): Promise<void> {
         invalidateAccountPool();
         await refreshExpiringTokens();
         await refreshDedicatedAccounts();
+        // Clear alerts whose underlying condition has cleared BEFORE emailing,
+        // so recovered accounts don't generate another notification.
+        const resolved = await autoResolveRecoveredAlerts();
+        if (resolved > 0) console.log(`[worker] auto-resolved ${resolved} recovered alert(s)`);
         await fireUnsentAlerts();
     } catch (err: unknown) {
-        console.error('[worker] Tick error:', (err as Error).message);
+        // Log the full error (some DB/DNS errors have an empty .message)
+        const e = err as { message?: string; code?: string; name?: string };
+        console.error('[worker] Tick error:', e.message || e.code || e.name || String(err));
     }
 }
 

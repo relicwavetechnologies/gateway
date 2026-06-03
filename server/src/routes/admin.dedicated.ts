@@ -172,7 +172,7 @@ router.post('/test/:id', async (req, res) => {
     }
 
     const { model: reqModel, message: reqMessage } = req.body as { model?: string; message?: string };
-    const testModel = reqModel ?? 'gpt-5.4';
+    const testModel = reqModel ?? 'gpt-5.5';
     const prompt = reqMessage ?? 'say "ok" only';
 
     const start = Date.now();
