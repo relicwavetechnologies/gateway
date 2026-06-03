@@ -207,14 +207,16 @@ export async function resolveAlert(id: string): Promise<void> {
 }
 
 export async function getUnEmailedAlerts(): Promise<Alert[]> {
-    const oneHourAgo = now() - 3_600_000;
-    // rate_limit is a normal, self-healing event — keep it stored/visible in the
-    // dashboard but never email it (it was the main source of inbox spam).
+    // Email each alert exactly ONCE (emailed_at IS NULL), then never again until it
+    // is resolved and a fresh one is created. The previous "re-email every hour"
+    // behaviour was the source of continuous inbox spam for persistent conditions
+    // (e.g. an account stuck auth_expired). rate_limit is never emailed at all —
+    // it's normal and self-healing — but stays stored/visible in the dashboard.
     return sql<Alert[]>`
         SELECT * FROM alerts
         WHERE resolved = 0
           AND kind <> 'rate_limit'
-          AND (emailed_at IS NULL OR emailed_at < ${oneHourAgo})
+          AND emailed_at IS NULL
         ORDER BY last_seen DESC
     `;
 }
