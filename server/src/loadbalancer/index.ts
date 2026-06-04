@@ -22,9 +22,17 @@ const inMemoryCooldown = new Map<string, number>();
 // Consecutive failure streak per account — resets on success, drives backoff.
 const consecutiveFailures = new Map<string, number>();
 
-const OPENAI_FREE_RATE_LIMIT_COOLDOWN_MS = 7 * 24 * 60 * 60_000;
-const OPENAI_PRO_RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 60_000;
-const OPENAI_PRO_PRIORITY_BONUS_MS = 7 * 24 * 60 * 60_000;
+// ─── Scoring weights (all in "ms of effective recency") ────────────────────────
+// Everything is expressed on the same idle-time scale so the terms compose
+// predictably. No giant tier bonus — quota headroom does the favouring instead.
+const QUOTA_PRESSURE_MS    = 60 * 60_000;       // 100% quota used ≈ +1h penalty
+const NEAR_LIMIT_PCT       = 90;                // at/above this, avoid pre-emptively
+const NEAR_LIMIT_PENALTY_MS = 6 * 60 * 60_000;  // shove near-exhausted accounts to the back
+const ERROR_PENALTY_MS     = 60_000;            // small bias off flaky accounts
+
+// When a 429 arrives but we have no reset header to derive a real cooldown from,
+// bench the account for this long (optimistic — quota windows reset in hours).
+const OPENAI_RATE_LIMIT_FALLBACK_MS = 30 * 60_000;
 
 // ─── Cooldown helpers ─────────────────────────────────────────────────────────
 
@@ -61,17 +69,36 @@ export function classifyError(statusCode: number, message?: string): ErrorKind {
     return 'unknown';
 }
 
-// ─── LRU priority score ───────────────────────────────────────────────────────
+// ─── Quota helper ───────────────────────────────────────────────────────────
+// Highest used-% across the codex windows we track (5h primary + weekly
+// secondary), or null when we have no telemetry for this account. A window
+// whose reset timestamp has already passed is treated as fresh (0%) — the
+// stored % is stale the instant the window rolls over.
+export function quotaUsedPercent(account: ActiveAccount): number | null {
+    const nowMs = Date.now();
+    const primary = account.codex_primary_reset && Number(account.codex_primary_reset) < nowMs
+        ? 0 : account.codex_primary_pct;
+    const secondary = account.codex_secondary_reset && Number(account.codex_secondary_reset) < nowMs
+        ? 0 : account.codex_secondary_pct;
+    const vals = [primary, secondary].map(v => Number(v)).filter(v => Number.isFinite(v));
+    return vals.length ? Math.max(...vals) : null;
+}
+
+// ─── Priority score ───────────────────────────────────────────────────────────
 // Lower score = picked first.
 //
-// Core idea: always pick the account that was used (or assigned) furthest in
-// the past — Least Recently Used. This naturally spreads quota evenly across
-// all accounts without needing a counter or explicit round-robin.
+// Base = Least-Recently-Used: always pick the account used (or assigned)
+// furthest in the past, which spreads load evenly without an explicit counter.
 //
-// Error penalty biases heavily-failing accounts toward the back of the queue
-// without excluding them entirely — they'll still be tried if everything else
-// is cooling down.
-function accountPriority(account: ActiveAccount): number {
+// Quota pressure is layered on top: the more of its quota an account has burned,
+// the further back it goes. This is what makes balancing SMART — it favours
+// accounts with real headroom, so higher-limit (pro/team) accounts naturally
+// absorb more traffic (their used-% climbs slower) WITHOUT a brittle hard-coded
+// tier bonus, and an account approaching its limit is avoided *before* it 429s.
+//
+// Nothing here EXCLUDES an account — a maxed/flaky account just sinks to the
+// back and is still used as a last resort if everything else is busy.
+export function accountPriority(account: ActiveAccount): number {
     // Use the more recent of: in-memory assignment time OR DB last_used_at.
     // lastAssigned is more accurate for concurrent requests since it's set
     // before the request even finishes.
@@ -80,22 +107,24 @@ function accountPriority(account: ActiveAccount): number {
         account.last_used_at ? Number(account.last_used_at) : 0,
     );
 
-    const idleMs = Date.now() - lastUsed;
+    // Negative idle: longer idle → more negative → lower score → picked first.
+    let score = -(Date.now() - lastUsed);
 
-    // Only penalise error rate once we have enough samples (avoids punishing
-    // brand-new accounts that haven't had a chance to prove themselves).
+    // Quota pressure: proportional push-back as quota fills, plus a hard shove
+    // once an account is near its limit so we steer away from it pre-emptively.
+    const quota = quotaUsedPercent(account);
+    if (quota !== null) {
+        score += (quota / 100) * QUOTA_PRESSURE_MS;
+        if (quota >= NEAR_LIMIT_PCT) score += NEAR_LIMIT_PENALTY_MS;
+    }
+
+    // Error penalty: bias away from flaky accounts, but only once we have enough
+    // samples (avoids punishing brand-new accounts that haven't proven themselves).
     const requests = Number(account.request_count ?? 0);
     const errors   = Number(account.error_count   ?? 0);
-    const errorPenalty = requests >= 5 ? (errors / requests) * 60_000 : 0;
-    const tierBonus = account.provider === 'openai' && account.account_tier === 'pro'
-        ? OPENAI_PRO_PRIORITY_BONUS_MS
-        : 0;
+    if (requests >= 5) score += (errors / requests) * ERROR_PENALTY_MS;
 
-    // Negative idle: longer idle → more negative → lower score → picked first.
-    // Error penalty: more errors → larger positive → higher score → picked last.
-    // Tier bonus: OpenAI pro accounts should absorb most traffic before free
-    // accounts are used, while still preserving LRU ordering inside each tier.
-    return -idleMs + errorPenalty - tierBonus;
+    return score;
 }
 
 // ─── Account selectors ────────────────────────────────────────────────────────
@@ -140,10 +169,17 @@ export async function handleRateLimit(account: ActiveAccount, error: string): Pr
     const accountId = account.id;
 
     if (account.provider === 'openai') {
-        const cooldownMs = account.account_tier === 'pro'
-            ? OPENAI_PRO_RATE_LIMIT_COOLDOWN_MS
-            : OPENAI_FREE_RATE_LIMIT_COOLDOWN_MS;
-        const cooldownUntil = Date.now() + cooldownMs;
+        // Bench only until the quota actually resets. Prefer the soonest future
+        // reset reported by the codex headers; fall back to a short window when
+        // we have no telemetry. This is the "optimistic" part — we don't sideline
+        // an account for hours/days when its 5h window resets shortly.
+        const nowMs = Date.now();
+        const resets = [account.codex_primary_reset, account.codex_secondary_reset]
+            .map(r => Number(r))
+            .filter(r => Number.isFinite(r) && r > nowMs);
+        const cooldownUntil = resets.length
+            ? Math.min(...resets)
+            : nowMs + OPENAI_RATE_LIMIT_FALLBACK_MS;
 
         consecutiveFailures.delete(accountId);
         lastAssigned.delete(accountId);
@@ -152,7 +188,7 @@ export async function handleRateLimit(account: ActiveAccount, error: string): Pr
         invalidateAccountPool(account.provider);
 
         console.log(
-            `[lb] openai rate limit: ${accountId} (${account.account_tier}) — cooldown until ${new Date(cooldownUntil).toISOString()}`,
+            `[lb] openai rate limit: ${accountId} (${account.account_tier}) — cooldown until ${new Date(cooldownUntil).toISOString()} (reset-derived=${resets.length > 0})`,
         );
         return cooldownUntil;
     }
