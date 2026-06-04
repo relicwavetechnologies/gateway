@@ -53,6 +53,22 @@ function buildCurl(provider: string, model: string, apiKey: string) {
   -H "X-API-Key: ${key}" \\
   -d '{"model":"${model}","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}'`
   }
+  if (provider === 'deepseek') {
+    // DeepSeek defaults to Chinese on a bare "Hello" and defaults thinking ON.
+    // Show the system message (pins English) + thinking toggle so it's obvious.
+    const body = {
+      model,
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant. Always respond in English.' },
+        { role: 'user', content: 'Hello' },
+      ],
+      thinking: { type: 'disabled' },
+    }
+    return `curl ${GATEWAY_URL}/v1/chat/completions \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: ${key}" \\
+  -d '${JSON.stringify(body, null, 2)}'`
+  }
   return `curl ${GATEWAY_URL}/v1/chat/completions \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: ${key}" \\
@@ -174,6 +190,38 @@ export default function ApiKeys() {
               : <Copy size={14} className="text-zinc-400" />}
           </button>
         </div>
+
+        {/* DeepSeek-specific usage notes */}
+        {snipProvider === 'deepseek' && (
+          <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-4 space-y-2">
+            <p className="text-xs font-semibold text-cyan-300">🐋 DeepSeek — fields you can pass</p>
+            <ul className="space-y-2 text-xs text-zinc-400 leading-relaxed">
+              <li>
+                <span className="text-zinc-200 font-medium">Get English output</span> — DeepSeek may reply in Chinese to a bare “Hello”. Pin the language with a system message:{' '}
+                <code className="text-cyan-300 bg-zinc-800 px-1 py-0.5 rounded">{'{"role":"system","content":"Always respond in English."}'}</code>
+              </li>
+              <li>
+                <code className="text-cyan-300 bg-zinc-800 px-1 py-0.5 rounded">thinking</code> —{' '}
+                <code className="text-zinc-300">{'{"type":"disabled"}'}</code> for fast plain chat, or{' '}
+                <code className="text-zinc-300">{'{"type":"enabled"}'}</code> to get a reasoning trace (returned as <code className="text-zinc-300">reasoning_content</code>). DeepSeek defaults to <span className="text-zinc-200">enabled</span>.
+              </li>
+              <li>
+                <code className="text-cyan-300 bg-zinc-800 px-1 py-0.5 rounded">reasoning_effort</code> —{' '}
+                <code className="text-zinc-300">"high"</code> (default) or <code className="text-zinc-300">"max"</code> for deeper reasoning when thinking is on.
+              </li>
+              <li>
+                <code className="text-cyan-300 bg-zinc-800 px-1 py-0.5 rounded">stream</code> — add{' '}
+                <code className="text-zinc-300">"stream":true</code> for token-by-token SSE (reasoning streams as <code className="text-zinc-300">delta.reasoning_content</code>).
+              </li>
+              <li>
+                <span className="text-zinc-200 font-medium">Models</span> —{' '}
+                <code className="text-zinc-300">deepseek-v4-flash</code> (fast, 1M context) ·{' '}
+                <code className="text-zinc-300">deepseek-v4-pro</code> (strongest) · legacy{' '}
+                <code className="text-zinc-300">deepseek-reasoner</code> / <code className="text-zinc-300">deepseek-chat</code> map to flash.
+              </li>
+            </ul>
+          </div>
+        )}
       </div>
 
       {/* Keys list */}
