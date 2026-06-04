@@ -32,6 +32,15 @@ const MODELS: Record<string, { label: string; models: string[] }> = {
       'claude-opus-4-6',       // Opus 4.6 — legacy
     ],
   },
+  deepseek: {
+    label: '🐋 DeepSeek',
+    models: [
+      'deepseek-v4-flash',     // V4 Flash — fast, 1M ctx
+      'deepseek-v4-pro',       // V4 Pro — strongest
+      'deepseek-reasoner',     // legacy alias → flash (thinking on)
+      'deepseek-chat',         // legacy alias → flash (thinking off)
+    ],
+  },
 }
 
 const GATEWAY_URL = (import.meta.env.VITE_API_URL ?? window.location.origin).replace(/\/$/, '')
