@@ -1,4 +1,4 @@
-export type Provider = 'openai' | 'claude' | 'gemini'
+export type Provider = 'openai' | 'claude' | 'gemini' | 'deepseek'
 
 export type AccountStatus = 'active' | 'rate_limited' | 'auth_expired' | 'error' | 'disabled'
 

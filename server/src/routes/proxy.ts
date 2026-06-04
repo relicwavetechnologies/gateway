@@ -14,6 +14,7 @@ import {
 import { forwardToOpenAI } from '../loadbalancer/openai.js';
 import { forwardToClaude } from '../loadbalancer/claude.js';
 import { forwardToGemini, isProModel, MIN_PRO_ACCOUNTS, LITE_MODELS } from '../loadbalancer/gemini.js';
+import { forwardToDeepSeek } from '../loadbalancer/deepseek.js';
 import { logUsage, createAlert, getUnEmailedAlerts, markAlertEmailed } from '../db/usage.js';
 import { sendAlert } from '../utils/email.js';
 import { updateAccountCodexHeaders, type ActiveAccount, type CodexHeaders } from '../db/accounts.js';
@@ -24,12 +25,13 @@ import { logLatency } from '../utils/timing.js';
 const router = Router();
 router.use(requireApiKey);
 
-type Provider = 'openai' | 'claude' | 'gemini';
+type Provider = 'openai' | 'claude' | 'gemini' | 'deepseek';
 
 const AVAILABLE_MODEL_FAMILIES = [
     'OpenAI/Codex: gpt-5.5, gpt-5.4-mini, plus common gpt-4/o-series aliases',
     'Gemini: model names starting with gemini-',
     'Claude: model names starting with claude-',
+    'DeepSeek: deepseek-v4-flash, deepseek-v4-pro (deepseek-chat / deepseek-reasoner aliases)',
 ];
 
 function unavailableModelMessage(model: string): string {
@@ -43,6 +45,7 @@ function isExternalProviderModel(model: string): boolean {
 function detectProvider(model: string): Provider | null {
     if (model.startsWith('gemini-')) return 'gemini';
     if (model.startsWith('claude-')) return 'claude';
+    if (model.startsWith('deepseek-')) return 'deepseek';
     if (isExternalProviderModel(model)) return null;
     return 'openai';
 }
@@ -183,6 +186,40 @@ async function handleDedicatedRequest(req: Request, res: Response): Promise<void
     }
 }
 
+// DeepSeek bypasses the OAuth account pool entirely: one API key, no rotation,
+// no cooldowns. The SDK handles retry/backoff on transient errors internally.
+async function handleDeepSeekRequest(req: Request, res: Response): Promise<void> {
+    const apiKey = req.apiKey;
+    const model = (req.body as { model?: string }).model ?? 'deepseek-v4-flash';
+    const start = Date.now();
+
+    try {
+        const result = await forwardToDeepSeek(req.body as Parameters<typeof forwardToDeepSeek>[0], res);
+
+        await logUsage({
+            id: uuid(), apiKeyId: apiKey.id, accountId: 'deepseek',
+            provider: 'deepseek', model, statusCode: 200, latencyMs: Date.now() - start,
+            error: null, promptTokens: result.promptTokens, completionTokens: result.completionTokens,
+        });
+    } catch (err: unknown) {
+        const axiosErr = err as { status?: number; response?: { status?: number; data?: unknown }; message?: string; code?: string };
+        const statusCode = axiosErr.status ?? axiosErr.response?.status ?? 500;
+        const message = providerErrorMessage(axiosErr);
+
+        console.error(`[proxy] deepseek failed — ${statusCode}: ${message}`);
+
+        await logUsage({
+            id: uuid(), apiKeyId: apiKey.id, accountId: 'deepseek',
+            provider: 'deepseek', model, statusCode, latencyMs: Date.now() - start,
+            error: message, promptTokens: undefined, completionTokens: undefined,
+        });
+
+        if (!res.headersSent) {
+            res.status(statusCode === 429 ? 429 : 502).json({ error: message });
+        }
+    }
+}
+
 async function proxyRequest(
     forcedProvider: Provider | null,
     req: Request,
@@ -210,6 +247,12 @@ async function proxyRequest(
 
     if (!apiKey.allowed_providers.includes(provider)) {
         res.status(403).json({ error: `This API key is not allowed to use ${provider}` });
+        return;
+    }
+
+    // DeepSeek: single API key, no account pool — route straight through.
+    if (provider === 'deepseek') {
+        await handleDeepSeekRequest(req, res);
         return;
     }
 

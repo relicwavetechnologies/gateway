@@ -22,7 +22,7 @@ router.post('/', async (req, res) => {
     const { raw, metadata } = await createApiKey({
         id: uuid(),
         name,
-        allowedProviders: allowed_providers ?? ['openai', 'claude', 'gemini'],
+        allowedProviders: allowed_providers ?? ['openai', 'claude', 'gemini', 'deepseek'],
         rateLimitRpm: rate_limit_rpm ?? null,
         createdBy: req.uid,
     });
