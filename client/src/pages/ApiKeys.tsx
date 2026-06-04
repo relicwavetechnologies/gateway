@@ -65,7 +65,7 @@ export default function ApiKeys() {
   const [snipKey, setSnipKey] = useState<string>('')
 
   const create = useMutation({
-    mutationFn: () => createApiKey({ name, allowed_providers: ['openai', 'claude', 'gemini'] }),
+    mutationFn: () => createApiKey({ name, allowed_providers: ['openai', 'claude', 'gemini', 'deepseek'] }),
     onSuccess: (data) => { setNewKey(data.key); qc.invalidateQueries({ queryKey: ['api-keys'] }) },
   })
 
