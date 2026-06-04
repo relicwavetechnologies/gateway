@@ -35,11 +35,12 @@ export type UsageSummary = {
   openai_requests: number
   claude_requests: number
   gemini_requests: number
+  deepseek_requests: number
   total_prompt_tokens: number
   total_completion_tokens: number
   p50_latency_ms: number | null
   p95_latency_ms: number | null
-  timeline: { label: string; openai: number; claude: number; gemini: number; errors: number }[]
+  timeline: { label: string; openai: number; claude: number; gemini: number; deepseek: number; errors: number }[]
   by_account: {
     account_id: string
     label: string | null

@@ -33,6 +33,7 @@ const PROVIDER_COLOR: Record<string, string> = {
   openai: 'bg-emerald-400',
   claude: 'bg-violet-400',
   gemini: 'bg-blue-400',
+  deepseek: 'bg-cyan-400',
 }
 
 export default function Usage() {
@@ -63,6 +64,7 @@ export default function Usage() {
     { label: 'OpenAI', value: usage?.openai_requests ?? 0, color: 'text-emerald-400' },
     { label: 'Gemini', value: usage?.gemini_requests ?? 0, color: 'text-blue-400' },
     { label: 'Claude', value: usage?.claude_requests ?? 0, color: 'text-violet-400' },
+    { label: 'DeepSeek', value: usage?.deepseek_requests ?? 0, color: 'text-cyan-400' },
   ]
 
   return (
@@ -97,7 +99,7 @@ export default function Usage() {
       </div>
 
       {/* Per-provider breakdown */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {providerStats.map(p => (
           <div key={p.label} className="card flex items-center gap-4">
             <div className={cn('text-2xl font-bold', p.color)}>{p.value.toLocaleString()}</div>
@@ -136,6 +138,10 @@ export default function Usage() {
                   <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
                   <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                 </linearGradient>
+                <linearGradient id="deepseekGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#22d3ee" stopOpacity={0} />
+                </linearGradient>
                 <linearGradient id="errorGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#ef4444" stopOpacity={0.25} />
                   <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
@@ -153,6 +159,7 @@ export default function Usage() {
               <Area type="monotone" dataKey="openai" name="OpenAI" stroke="#10b981" fill="url(#openaiGrad)" strokeWidth={1.5} dot={false} />
               <Area type="monotone" dataKey="gemini" name="Gemini" stroke="#3b82f6" fill="url(#geminiGrad)" strokeWidth={1.5} dot={false} />
               <Area type="monotone" dataKey="claude" name="Claude" stroke="#8b5cf6" fill="url(#claudeGrad)" strokeWidth={1.5} dot={false} />
+              <Area type="monotone" dataKey="deepseek" name="DeepSeek" stroke="#22d3ee" fill="url(#deepseekGrad)" strokeWidth={1.5} dot={false} />
               <Area type="monotone" dataKey="errors" name="Errors" stroke="#ef4444" fill="url(#errorGrad)" strokeWidth={1.5} dot={false} />
             </AreaChart>
           </ResponsiveContainer>
@@ -204,7 +211,7 @@ export default function Usage() {
               const acc = accounts.find((a: any) => a.id === row.account_id)
               const label = acc?.label ?? row.account_id?.slice(0, 8)
               const pct = totalReqs ? Math.round((row.count / totalReqs) * 100) : 0
-              const barColor = row.provider === 'openai' ? 'bg-emerald-500' : row.provider === 'gemini' ? 'bg-blue-500' : 'bg-violet-500'
+              const barColor = row.provider === 'openai' ? 'bg-emerald-500' : row.provider === 'gemini' ? 'bg-blue-500' : row.provider === 'deepseek' ? 'bg-cyan-500' : 'bg-violet-500'
               return (
                 <div key={row.account_id} className="space-y-1">
                   <div className="flex items-center justify-between text-xs text-zinc-400">

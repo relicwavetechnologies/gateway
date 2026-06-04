@@ -49,6 +49,7 @@ export default function Dashboard() {
     { label: 'OpenAI Accounts', value: `${activeOpenAI} / ${openaiAccounts.length}`, sub: `${activeOpenAIPro} pro active · ${coolingOpenAI} cooling`, icon: Server, color: 'text-emerald-400' },
     { label: 'Gemini Accounts', value: `${activeGemini} / ${geminiAccounts.length}`, sub: 'active', icon: Server, color: 'text-blue-400' },
     { label: 'Claude Accounts', value: `${activeClaude} / ${claudeAccounts.length}`, sub: 'active', icon: Server, color: 'text-violet-400' },
+    { label: 'DeepSeek', value: usage ? fmt(usage.deepseek_requests) : '—', sub: 'API key · no pool · 24h reqs', icon: Server, color: 'text-cyan-400' },
   ]
 
   const systemStats = [
@@ -63,7 +64,7 @@ export default function Dashboard() {
         <p className="text-sm text-zinc-500 mt-1">Real-time Gateway health from account, quota, and request telemetry</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {providerStats.map(s => (
           <div key={s.label} className="card">
             <div className="flex items-start justify-between">

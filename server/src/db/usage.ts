@@ -45,11 +45,12 @@ export async function getUsageSummary({ days = 7 }: { days?: number } = {}): Pro
     openai_requests: number;
     claude_requests: number;
     gemini_requests: number;
+    deepseek_requests: number;
     total_prompt_tokens: number;
     total_completion_tokens: number;
     p50_latency_ms: number | null;
     p95_latency_ms: number | null;
-    timeline: { label: string; openai: number; claude: number; gemini: number; errors: number }[];
+    timeline: { label: string; openai: number; claude: number; gemini: number; deepseek: number; errors: number }[];
     by_account: { account_id: string; label: string | null; provider: string; count: number; errors: number; prompt_tokens: number; completion_tokens: number }[];
     by_key: { key_id: string; key_name: string | null; key_prefix: string | null; count: number; errors: number; prompt_tokens: number; completion_tokens: number }[];
     by_model: { model: string; provider: string; count: number; prompt_tokens: number; completion_tokens: number }[];
@@ -120,7 +121,7 @@ export async function getUsageSummary({ days = 7 }: { days?: number } = {}): Pro
     const bucketMs = days <= 1 ? 3_600_000 : DAY;
     const bucketCount = days <= 1 ? 24 : days;
 
-    const timeline: { label: string; openai: number; claude: number; gemini: number; errors: number }[] = [];
+    const timeline: { label: string; openai: number; claude: number; gemini: number; deepseek: number; errors: number }[] = [];
     for (let i = 0; i < bucketCount; i++) {
         const bucketFrom = from + i * bucketMs;
         const bucketTo = bucketFrom + bucketMs;
@@ -128,15 +129,16 @@ export async function getUsageSummary({ days = 7 }: { days?: number } = {}): Pro
             ? new Date(bucketFrom).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
             : new Date(bucketFrom).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', timeZone: 'Asia/Kolkata' });
 
-        const [row] = await sql<[{ openai: string | null; claude: string | null; gemini: string | null; errors: string | null }]>`
+        const [row] = await sql<[{ openai: string | null; claude: string | null; gemini: string | null; deepseek: string | null; errors: string | null }]>`
             SELECT
                 SUM(CASE WHEN provider = 'openai' THEN 1 ELSE 0 END) as openai,
                 SUM(CASE WHEN provider = 'claude' THEN 1 ELSE 0 END) as claude,
                 SUM(CASE WHEN provider = 'gemini' THEN 1 ELSE 0 END) as gemini,
+                SUM(CASE WHEN provider = 'deepseek' THEN 1 ELSE 0 END) as deepseek,
                 SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as errors
             FROM usage_logs WHERE created_at BETWEEN ${bucketFrom} AND ${bucketTo}
         `;
-        timeline.push({ label, openai: Number(row?.openai ?? 0), claude: Number(row?.claude ?? 0), gemini: Number(row?.gemini ?? 0), errors: Number(row?.errors ?? 0) });
+        timeline.push({ label, openai: Number(row?.openai ?? 0), claude: Number(row?.claude ?? 0), gemini: Number(row?.gemini ?? 0), deepseek: Number(row?.deepseek ?? 0), errors: Number(row?.errors ?? 0) });
     }
 
     const providerMap = Object.fromEntries(byProvider.map(r => [r.provider, Number(r.n)]));
@@ -150,6 +152,7 @@ export async function getUsageSummary({ days = 7 }: { days?: number } = {}): Pro
         openai_requests: providerMap['openai'] ?? 0,
         claude_requests: providerMap['claude'] ?? 0,
         gemini_requests: providerMap['gemini'] ?? 0,
+        deepseek_requests: providerMap['deepseek'] ?? 0,
         total_prompt_tokens: Number(totalRow.pt),
         total_completion_tokens: Number(totalRow.ct),
         p50_latency_ms: latencyRow?.p50_latency_ms == null ? null : Math.round(Number(latencyRow.p50_latency_ms)),
